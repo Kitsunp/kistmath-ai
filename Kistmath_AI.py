@@ -36,6 +36,7 @@ from sklearn.model_selection import KFold
 from sklearn.metrics import mean_squared_error, r2_score
 import matplotlib.pyplot as plt
 import time
+import io
 import multiprocessing
 import queue
 import logging
@@ -51,6 +52,10 @@ tf.config.run_functions_eagerly(True)
 
 # Habilita el modo de depuración para tf.data
 tf.data.experimental.enable_debug_mode()
+
+# Verifica qué dispositivo está siendo utilizado
+print("Dispositivo que se está utilizando:", tf.device("/GPU:0" if gpus else "/CPU:0"))
+
 # Constants
 VOCAB_SIZE = 1000
 MAX_LENGTH = 10
