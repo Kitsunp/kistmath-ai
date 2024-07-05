@@ -147,8 +147,6 @@ Kistmat-AI is an advanced machine learning model designed to solve a wide range 
 - Dynamic Evaluation: Model readiness evaluation will be adapted to work with dynamic datasets.
 - Optimized Parallelism: Parallel training will be adjusted to make the most of available computational resources.
 
-
-
 ## Practical Applications
 
 Explore applications in:
@@ -163,8 +161,6 @@ Explore applications in:
 - Conduct thorough analysis of the ethical implications of model manipulations and interpretations.
 
 ## Needed Improvements
-
-This code represents an initial implementation of an AI model for solving mathematical problems. To enhance its quality, maintainability, and reliability, the following improvements are needed:
 
 ### 1. Documentation and Comments
 
@@ -205,8 +201,6 @@ project/
 
 - Review and optimize performance-critical sections
 - Consider using vectorized operations where applicable
-
-Implementing these improvements will enhance code readability, maintainability, and overall reliability. Contributors are encouraged to address these areas when working on the project.
 
 ## Usage
 
