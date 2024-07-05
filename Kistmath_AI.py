@@ -40,7 +40,7 @@ import io
 import multiprocessing
 import queue
 import logging
-from keras import ops
+from tensorflow.keras import ops
 from tensorflow.keras.utils import register_keras_serializable
 tf.keras.utils.register_keras_serializable(package='Custom', name=None)
 from matplotlib.backends.backend_agg import FigureCanvasAgg
@@ -100,12 +100,12 @@ class MathProblem:
         self.difficulty = difficulty
         self.concept = concept
 @register_keras_serializable()
-class CalcLearner(keras.Model):
+class Kistmat_AI(keras.Model):
     def __init__(self, input_shape, output_shape, vocab_size=VOCAB_SIZE, name=None, **kwargs):
         self.input_shape = input_shape
         self.output_shape = output_shape
         self.vocab_size = vocab_size
-        super(CalcLearner, self).__init__(name=name, **kwargs)
+        super(Kistmat_AI, self).__init__(name=name, **kwargs)
         
         self.embedding = keras.layers.Embedding(input_dim=vocab_size, output_dim=64)
         self.lstm1 = keras.layers.Bidirectional(keras.layers.LSTM(512, return_sequences=True))
@@ -348,7 +348,7 @@ def evaluate_readiness(model, problems, threshold):
 
 def train_fold(fold_data):
     model_config, model_weights, train_problems, val_problems, epochs = fold_data
-    model = CalcLearner.from_config(model_config)
+    model = Kistmat_AI.from_config(model_config)
     model.set_weights(model_weights)
     model.compile(optimizer='adam', loss='mse', metrics=['mae']) 
     
@@ -563,7 +563,7 @@ def smooth_curriculum_learning(model, stages, initial_problems=4000, max_problem
 
 # Modify main function
 def main():
-    model = CalcLearner(input_shape=(MAX_LENGTH,), output_shape=1)
+    model = Kistmat_AI(input_shape=(MAX_LENGTH,), output_shape=1)
     model.compile(optimizer='adam', loss='mse', metrics=['mae'])
     stages = ['elementary1', 'elementary2', 'elementary3', 'junior_high1', 'junior_high2', 
               'high_school1', 'high_school2', 'high_school3', 'university']
