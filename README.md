@@ -100,7 +100,7 @@ Kistmat-AI is an advanced machine learning model designed to solve a wide range 
 - The code is designed to be fully compatible with both types of hardware. This means that if the model is developed or trained on a CPU, it can be transferred and executed on a GPU without significant modifications, and vice versa.
 - This flexibility ensures that the model can be deployed in a variety of environments, adapting to the available hardware capabilities.
 
-##### Code Modularization and Maintenance Improvement (High Priority)
+### Code Modularization and Maintenance Improvement (High Priority)
 
 - Refactor the codebase into smaller, more manageable components.
 - Create separate modules for problem generation, model architecture, training loops, and evaluation metrics.
