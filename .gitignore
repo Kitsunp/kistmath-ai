@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# IDEs and Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# TensorFlow
+*.ckpt
+*.pb
+*.pbtxt
+
+# Matplotlib
+*.png
+
+# Logs
+*.log
+
+# Data files
+*.csv
+*.json
+*.npy
+
+# Build files
+build/
+dist/
+*.egg-info/
+
+# Temporary files
+*.tmp
+
+# Model files
+*.h5
+*.pkl
+
+# Environment variables
+.env
+
+# Specific to this project
+training_progress_epoch_*.png
+learning_curves.png
