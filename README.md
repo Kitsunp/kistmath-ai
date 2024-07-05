@@ -83,11 +83,11 @@ Kistmat-AI is an advanced machine learning model designed to solve a wide range 
 - Develop a hybrid training approach combining supervised learning with reinforcement learning for problem-solving strategies.
 - Introduce meta-learning techniques to improve the model's ability to learn new mathematical concepts quickly.
 
-###M odel Usage on CPU and GPU
+### Model Usage on CPU and GPU
 ### High Priority: System Resource Utilization
 - This model is designed to fully utilize system resources, whether on CPU or GPU. Depending on the available hardware, the model can efficiently operate on both types of processors. Below is a detailed explanation of how the model adapts to optimize performance in --each case:
 
-- GPU Detection and Usage:
+## GPU Detection and Usage:
 
 - If a GPU is detected, the model will automatically utilize the GPU for compute-intensive operations.
 - The implementation is optimized to take full advantage of the GPU's capabilities, ensuring fast and efficient execution.
@@ -95,7 +95,7 @@ Kistmat-AI is an advanced machine learning model designed to solve a wide range 
 
 - In the absence of a GPU, the model will run on the CPU, using all available cores to maximize efficiency.
 - The configuration allows the model to fully leverage the CPU's processing power, distributing tasks optimally.
-- Compatibility between CPU and GPU:
+## Compatibility between CPU and GPU:
 
 - The code is designed to be fully compatible with both types of hardware. This means that if the model is developed or trained on a CPU, it can be transferred and executed on a GPU without significant modifications, and vice versa.
 - This flexibility ensures that the model can be deployed in a variety of environments, adapting to the available hardware capabilities.
