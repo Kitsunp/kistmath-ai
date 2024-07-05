@@ -143,7 +143,14 @@ Explore applications in:
 
 ## Usage
 
-[Provide detailed instructions on how to set up and run the project, including any necessary environment setup, data preparation, and execution commands.]
+```bash
+pip install tensorflow==2.16.1
+pip install tensorflow-model-optimization==0.8.0
+pip install scikit-learn==1.3.2
+pip install tf-keras==2.16.0
+pip install keras-tuner==1.4.7
+pip install keras==3.3.3
+pip install torch
 
 ## Contributing
 
