@@ -1,18 +1,35 @@
-# Import statements
 import numpy as np
 import os
-import threading
-os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+import tensorflow as tf
+
+# Elimina la configuración forzada de CPU
+# os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 # Configura TensorFlow para usar todos los núcleos de CPU disponibles
 os.environ['TF_NUM_INTEROP_THREADS'] = str(os.cpu_count())
 os.environ['TF_NUM_INTRAOP_THREADS'] = str(os.cpu_count())
 
-# Configura TensorFlow para usar la memoria de manera más agresiva
+# Configura TensorFlow para usar la memoria de manera más eficiente
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+
+# Detecta si hay GPU disponible
+gpus = tf.config.list_physical_devices('GPU')
+
+if gpus:
+    try:
+        # Intenta usar la primera GPU disponible
+        tf.config.experimental.set_visible_devices(gpus[0], 'GPU')
+        logical_gpus = tf.config.experimental.list_logical_devices('GPU')
+        print(f"Se detectaron {len(gpus)} GPUs físicas y {len(logical_gpus)} GPUs lógicas")
+    except RuntimeError as e:
+        # Error de memoria de GPU u otros problemas
+        print(f"Error al configurar GPU: {e}")
+        print("Usando CPU")
+else:
+    print("No se detectaron GPUs. Usando CPU")
+
+# El resto de tus importaciones y configuraciones
 import keras
-import tensorflow as tf
 from tensorflow import keras
 import sympy as sp
 from sklearn.model_selection import KFold
@@ -21,23 +38,19 @@ import matplotlib.pyplot as plt
 import time
 import multiprocessing
 import queue
-import os
-import io
 import logging
 from keras import ops
-import tensorflow as tf 
-from tensorflow.keras.utils import register_keras_serializable   
-tf.keras.utils.register_keras_serializable(
-    package='Custom', name=None
-)
+from tensorflow.keras.utils import register_keras_serializable
+tf.keras.utils.register_keras_serializable(package='Custom', name=None)
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="keras.src.ops.nn")
+
 # Habilita la ejecución eager
 tf.config.run_functions_eagerly(True)
+
 # Habilita el modo de depuración para tf.data
 tf.data.experimental.enable_debug_mode()
-
 # Constants
 VOCAB_SIZE = 1000
 MAX_LENGTH = 10
