@@ -2,33 +2,33 @@ import numpy as np
 import os
 import tensorflow as tf
 
-# Elimina la configuración forzada de CPU
+# Remove forced CPU configuration
 # os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
-# Configura TensorFlow para usar todos los núcleos de CPU disponibles
+# Configure TensorFlow to use all available CPU cores
 os.environ['TF_NUM_INTEROP_THREADS'] = str(os.cpu_count())
 os.environ['TF_NUM_INTRAOP_THREADS'] = str(os.cpu_count())
 
-# Configura TensorFlow para usar la memoria de manera más eficiente
+# Configure TensorFlow to use memory more efficiently
 os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
 
-# Detecta si hay GPU disponible
+# Detect if GPU is available
 gpus = tf.config.list_physical_devices('GPU')
 
 if gpus:
     try:
-        # Intenta usar la primera GPU disponible
+        # Try to use the first available GPU
         tf.config.experimental.set_visible_devices(gpus[0], 'GPU')
         logical_gpus = tf.config.experimental.list_logical_devices('GPU')
-        print(f"Se detectaron {len(gpus)} GPUs físicas y {len(logical_gpus)} GPUs lógicas")
+        print(f"Detected {len(gpus)} physical GPUs and {len(logical_gpus)} logical GPUs")
     except RuntimeError as e:
-        # Error de memoria de GPU u otros problemas
-        print(f"Error al configurar GPU: {e}")
-        print("Usando CPU")
+        # GPU memory error or other problems
+        print(f"Error configuring GPU: {e}")
+        print("Using CPU")
 else:
-    print("No se detectaron GPUs. Usando CPU")
+    print("No GPUs detected. Using CPU")
 
-# El resto de tus importaciones y configuraciones
+# Rest of your imports and configurations
 import keras
 from tensorflow import keras
 import sympy as sp
@@ -40,21 +40,21 @@ import io
 import multiprocessing
 import queue
 import logging
-from tensorflow.keras import ops
+from keras import ops
 from tensorflow.keras.utils import register_keras_serializable
 tf.keras.utils.register_keras_serializable(package='Custom', name=None)
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="keras.src.ops.nn")
 
-# Habilita la ejecución eager
+# Enable eager execution
 tf.config.run_functions_eagerly(True)
 
-# Habilita el modo de depuración para tf.data
+# Enable debug mode for tf.data
 tf.data.experimental.enable_debug_mode()
 
-# Verifica qué dispositivo está siendo utilizado
-print("Dispositivo que se está utilizando:", tf.device("/GPU:0" if gpus else "/CPU:0"))
+# Verify which device is being used
+print("Device being used:", tf.device("/GPU:0" if gpus else "/CPU:0"))
 
 # Constants
 VOCAB_SIZE = 1000
@@ -62,6 +62,10 @@ MAX_LENGTH = 10
 MAX_TERMS = 5
 
 class ExternalMemory:
+    """
+    Implements an external memory mechanism for the Kistmat AI model.
+    This allows the model to store and retrieve information during processing.
+    """
     def __init__(self, memory_size=100, key_size=64, value_size=128):
         self.memory_size = memory_size
         self.key_size = key_size
@@ -72,6 +76,9 @@ class ExternalMemory:
 
     @tf.function
     def query(self, query_key):
+        """
+        Queries the memory with a given key and returns the corresponding value.
+        """
         query_key = tf.cast(query_key, tf.float32)
         similarities = tf.matmul(query_key, self.keys, transpose_b=True)
         weights = tf.nn.sigmoid(similarities)
@@ -79,6 +86,9 @@ class ExternalMemory:
 
     @tf.function
     def update(self, key, value):
+        """
+        Updates the memory with a new key-value pair.
+        """
         key = tf.cast(key, tf.float32)
         value = tf.cast(value, tf.float32)
         key = tf.reshape(key, [-1, self.key_size])
@@ -94,19 +104,29 @@ class ExternalMemory:
         self.usage.assign(self.usage * 0.99)
 
 class MathProblem:
+    """
+    Represents a mathematical problem with its solution, difficulty, and concept.
+    """
     def __init__(self, problem, solution, difficulty, concept):
         self.problem = problem
         self.solution = solution
         self.difficulty = difficulty
         self.concept = concept
+
 @register_keras_serializable()
 class Kistmat_AI(keras.Model):
+    """
+    The main Kistmat AI model for solving mathematical problems.
+    This model uses a combination of LSTM layers, attention mechanisms,
+    and external memory to process and solve various types of math problems.
+    """
     def __init__(self, input_shape, output_shape, vocab_size=VOCAB_SIZE, name=None, **kwargs):
         self.input_shape = input_shape
         self.output_shape = output_shape
         self.vocab_size = vocab_size
         super(Kistmat_AI, self).__init__(name=name, **kwargs)
         
+        # Define layers
         self.embedding = keras.layers.Embedding(input_dim=vocab_size, output_dim=64)
         self.lstm1 = keras.layers.Bidirectional(keras.layers.LSTM(512, return_sequences=True))
         self.lstm2 = keras.layers.Bidirectional(keras.layers.LSTM(512))
@@ -118,6 +138,7 @@ class Kistmat_AI(keras.Model):
         
         self.reasoning_layer = keras.layers.Dense(512, activation='relu', kernel_regularizer=keras.regularizers.l2(0.01))
         
+        # Output layers for different learning stages
         self.output_layers = {
             'elementary1': keras.layers.Dense(128, activation='linear'),
             'elementary2': keras.layers.Dense(128, activation='linear'),
@@ -137,13 +158,22 @@ class Kistmat_AI(keras.Model):
         self._learning_stage = tf.Variable('elementary1', trainable=False, dtype=tf.string)
     
     def get_learning_stage(self):
+        """
+        Returns the current learning stage of the model.
+        """
         return self._learning_stage.numpy().decode()
 
     def set_learning_stage(self, stage):
+        """
+        Sets the learning stage of the model.
+        """
         self._learning_stage.assign(stage.encode())
     
     @tf.function
     def call(self, inputs, training=False):
+        """
+        Forward pass of the model.
+        """
         current_stage = self.get_learning_stage()
         if current_stage == 'university':
             x = inputs
@@ -175,6 +205,9 @@ class Kistmat_AI(keras.Model):
         return self.final_output(x)
 
     def get_config(self):
+        """
+        Returns the configuration of the model.
+        """
         config = super().get_config()
         config.update({
             "input_shape": self.input_shape,
@@ -186,43 +219,66 @@ class Kistmat_AI(keras.Model):
 
     @classmethod
     def from_config(cls, config):
-        # Extraer los argumentos necesarios de la configuración
+        """
+        Creates a model instance from a configuration dictionary.
+        """
+        # Extract necessary arguments from the configuration
         input_shape = config.pop("input_shape", None)
         output_shape = config.pop("output_shape", None)
         vocab_size = config.pop("vocab_size", VOCAB_SIZE)
         learning_stage = config.pop("learning_stage", "elementary1")
         
-        # Si input_shape o output_shape no están en la configuración, usar valores por defecto
+        # If input_shape or output_shape are not in the configuration, use default values
         if input_shape is None:
             input_shape = (MAX_LENGTH,)
         if output_shape is None:
             output_shape = 1
         
-        # Crear una nueva instancia con los argumentos extraídos
+        # Create a new instance with the extracted arguments
         instance = cls(input_shape=input_shape, output_shape=output_shape, vocab_size=vocab_size, **config)
         instance.set_learning_stage(learning_stage)
         return instance
+
 class SymbolicReasoner:
+    """
+    Implements symbolic reasoning capabilities for the Kistmat AI model.
+    """
     def __init__(self):
         self.symbols = {}
         self.rules = []
     
     def add_symbol(self, name):
+        """
+        Adds a new symbol to the reasoner.
+        """
         self.symbols[name] = sp.Symbol(name)
     
     def add_rule(self, rule):
+        """
+        Adds a new rule to the reasoner.
+        """
         self.rules.append(rule)
     
     def apply_rules(self, expression):
+        """
+        Applies all rules to the given expression.
+        """
         for rule in self.rules:
             expression = expression.replace(rule)
         return expression
     
     def simplify(self, expression):
+        """
+        Simplifies the given expression.
+        """
         return sp.simplify(expression)
 
 # Utility functions
+
 def tokenize_problem(problem, vocab_size=VOCAB_SIZE, max_length=MAX_LENGTH):
+    """
+    Tokenizes a problem string into a fixed-length sequence of integers.
+    """
     tokens = problem.lower().split()
     tokens = [hash(token) % vocab_size for token in tokens]
     tokens = tokens[:max_length]
@@ -230,6 +286,9 @@ def tokenize_problem(problem, vocab_size=VOCAB_SIZE, max_length=MAX_LENGTH):
     return tokens
 
 def tokenize_calculus_problem(problem, max_terms=MAX_TERMS):
+    """
+    Tokenizes a calculus problem into a fixed-length sequence of coefficients and exponents.
+    """
     # Extract the function from the problem string
     func_str = problem.split("d/dx ")[1].strip("()")
     
@@ -244,6 +303,9 @@ def tokenize_calculus_problem(problem, max_terms=MAX_TERMS):
     return np.pad(np.concatenate([coeffs, exponents]), (0, MAX_LENGTH - 2*max_terms))
 
 def generate_dataset(num_problems, stage, difficulty):
+    """
+    Generates a dataset of math problems for a given stage and difficulty.
+    """
     problems = []
     if stage == 'elementary1':  # 1st-2nd grade
         for _ in range(num_problems):
@@ -328,8 +390,18 @@ def generate_dataset(num_problems, stage, difficulty):
             problems.append(MathProblem(problem_str, solution, difficulty, 'derivatives'))
     return problems
 
-# Modify evaluate_readiness function
 def evaluate_readiness(model, problems, threshold):
+    """
+    Evaluates if the model is ready to advance to the next learning stage.
+    
+    Args:
+    model: The Kistmat_AI model to evaluate
+    problems: A list of MathProblem instances to use for evaluation
+    threshold: The R-squared threshold for considering the model ready
+
+    Returns:
+    bool: True if the model is ready to advance, False otherwise
+    """
     model.compile(optimizer='adam', loss='mse', metrics=['mae'])
     if model.get_learning_stage() == 'university':
         X = np.array([tokenize_calculus_problem(p.problem) for p in problems])
@@ -347,6 +419,15 @@ def evaluate_readiness(model, problems, threshold):
     return r2 > threshold
 
 def train_fold(fold_data):
+    """
+    Trains the model on a single fold of data.
+    
+    Args:
+    fold_data: A tuple containing model configuration, weights, training problems, validation problems, and number of epochs
+
+    Returns:
+    dict: A dictionary containing training history and updated model weights
+    """
     model_config, model_weights, train_problems, val_problems, epochs = fold_data
     model = Kistmat_AI.from_config(model_config)
     model.set_weights(model_weights)
@@ -366,6 +447,18 @@ def train_fold(fold_data):
     return {'history': history.history, 'weights': model.get_weights()}
 
 def parallel_train_model(model, problems, epochs=10, n_folds=3):
+    """
+    Trains the model in parallel using k-fold cross-validation.
+    
+    Args:
+    model: The Kistmat_AI model to train
+    problems: A list of MathProblem instances to use for training
+    epochs: Number of training epochs per fold
+    n_folds: Number of folds for cross-validation
+
+    Returns:
+    list: A list of dictionaries containing training history and updated model weights for each fold
+    """
     kf = KFold(n_splits=n_folds)
     fold_data = []
     
@@ -382,8 +475,16 @@ def parallel_train_model(model, problems, epochs=10, n_folds=3):
     
     return fold_histories
 
-# Modify reinforce_single function
 def reinforce_single(args):
+    """
+    Performs a single reinforcement learning step on the model.
+    
+    Args:
+    args: A tuple containing the model, problem, prediction, and true solution
+
+    Returns:
+    float: The loss after the reinforcement step
+    """
     model, problem, prediction, true_solution = args
     if model.get_learning_stage() == 'university':
         inputs = tf.convert_to_tensor([tokenize_calculus_problem(problem.problem)])
@@ -397,12 +498,25 @@ def reinforce_single(args):
         loss = tf.reduce_mean(tf.square(true_solution_tensor - predicted))
     
     gradients = tape.gradient(loss, model.trainable_variables)
-    optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)  # Ajusta la tasa de aprendizaje
+    optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)  # Adjust the learning rate
     optimizer.apply_gradients(zip(gradients, model.trainable_variables))
     
     return loss.numpy()
 
 def parallel_reinforce_learning(model, problems, predictions, true_solutions, learning_rate=0.01):
+    """
+    Performs parallel reinforcement learning on the model.
+    
+    Args:
+    model: The Kistmat_AI model to reinforce
+    problems: A list of MathProblem instances
+    predictions: The model's predictions for the problems
+    true_solutions: The true solutions for the problems
+    learning_rate: The learning rate for reinforcement
+
+    Returns:
+    list: A list of losses after reinforcement
+    """
     reinforce_data = [(model, problem, prediction, true_solution) 
                       for problem, prediction, true_solution in zip(problems, predictions, true_solutions)]
     
@@ -412,7 +526,14 @@ def parallel_reinforce_learning(model, problems, predictions, true_solutions, le
     return losses
 
 # Visualization functions
+
 def plot_learning_curves(all_history):
+    """
+    Plots learning curves for all stages of the curriculum.
+    
+    Args:
+    all_history: A list of dictionaries containing training history for each stage
+    """
     fig, axes = plt.subplots(2, 2, figsize=(15, 10))
     stages = ['basic', 'algebra', 'precalculus', 'calculus']
     
@@ -440,6 +561,12 @@ def plot_learning_curves(all_history):
     plt.close()
 
 def real_time_plotter(plot_queue):
+    """
+    Plots real-time training progress.
+    
+    Args:
+    plot_queue: A multiprocessing Queue containing plot data
+    """
     plt.switch_backend('agg')
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
     
@@ -505,8 +632,21 @@ def real_time_plotter(plot_queue):
     
     plt.close(fig)
 
-# Modify smooth_curriculum_learning function
 def smooth_curriculum_learning(model, stages, initial_problems=4000, max_problems=5000, difficulty_increase_rate=0.05, plot_queue=None):
+    """
+    Implements smooth curriculum learning for the Kistmat AI model.
+    
+    Args:
+    model: The Kistmat_AI model to train
+    stages: A list of learning stages
+    initial_problems: Initial number of problems per stage
+    max_problems: Maximum number of problems per stage
+    difficulty_increase_rate: Rate at which difficulty increases
+    plot_queue: A multiprocessing Queue for real-time plotting
+
+    Returns:
+    list: A list of dictionaries containing training history for each stage
+    """
     all_history = []
     current_difficulty = 1.0
 
@@ -533,7 +673,7 @@ def smooth_curriculum_learning(model, stages, initial_problems=4000, max_problem
             num_problems = min(initial_problems, max_problems - problems_solved)
             problems = generate_dataset(num_problems, stage, current_difficulty)
 
-            fold_histories = parallel_train_model(model, problems, epochs=50)  # Aumenta el número de épocas
+            fold_histories = parallel_train_model(model, problems, epochs=50)  # Increase number of epochs
             
             # Update the model with the new weights from the last fold
             model.set_weights(fold_histories[-1]['weights'])
@@ -561,8 +701,10 @@ def smooth_curriculum_learning(model, stages, initial_problems=4000, max_problem
 
     return all_history
 
-# Modify main function
 def main():
+    """
+    Main function to run the Kistmat AI training process.
+    """
     model = Kistmat_AI(input_shape=(MAX_LENGTH,), output_shape=1)
     model.compile(optimizer='adam', loss='mse', metrics=['mae'])
     stages = ['elementary1', 'elementary2', 'elementary3', 'junior_high1', 'junior_high2', 
