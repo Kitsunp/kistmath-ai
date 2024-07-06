@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import io
 import multiprocessing
 import queue
-from numpy import np
+import numpy as np
 def plot_learning_curves(all_history):
     fig, axes = plt.subplots(2, 2, figsize=(15, 10))
     stages = ['basic', 'algebra', 'precalculus', 'calculus']
