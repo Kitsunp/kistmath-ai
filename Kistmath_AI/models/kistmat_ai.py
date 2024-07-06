@@ -1,4 +1,5 @@
 import tensorflow as tf
+tf.config.run_functions_eagerly(True)
 from tensorflow import keras
 from keras import ops
 from tensorflow.keras.utils import register_keras_serializable
