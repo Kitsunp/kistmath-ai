@@ -11,7 +11,7 @@ from training.parallel_training import parallel_reinforce_learning
 from visualization.plotting import plot_learning_curves, real_time_plotter
 from config.settings import STAGES, MAX_LENGTH, READINESS_THRESHOLDS
 import multiprocessing
-from numpy import np
+import numpy as np
 
 def main():
     # Configure TensorFlow
