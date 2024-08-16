@@ -3,8 +3,8 @@ tf.config.run_functions_eagerly(True)
 from tensorflow import keras
 from keras import ops
 from tensorflow.keras.utils import register_keras_serializable
-from models.external_memory import ExternalMemory, FormulativeMemory, ConceptualMemory, ShortTermMemory, LongTermMemory, InferenceMemory
-from config.settings import VOCAB_SIZE, MAX_LENGTH
+from Kistmath_AI.models.external_memory import ExternalMemory, FormulativeMemory, ConceptualMemory, ShortTermMemory, LongTermMemory, InferenceMemory
+from Kistmath_AI.config.settings import VOCAB_SIZE, MAX_LENGTH
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

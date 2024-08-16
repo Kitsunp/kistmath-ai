@@ -2,8 +2,8 @@ import multiprocessing
 import numpy as np
 import tensorflow as tf
 from sklearn.model_selection import KFold
-from utils.tokenization import tokenize_problem, tokenize_calculus_problem
-from models.kistmat_ai import Kistmat_AI
+from Kistmath_AI.utils.tokenization import tokenize_problem, tokenize_calculus_problem
+from Kistmath_AI.models.kistmat_ai import Kistmat_AI
 
 def train_fold(fold_data):
     model_config, model_weights, train_problems, val_problems, epochs = fold_data

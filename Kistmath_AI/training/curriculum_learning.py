@@ -1,7 +1,7 @@
-from utils.data_generation import generate_dataset
-from utils.evaluation import evaluate_readiness
-from training.parallel_training import parallel_train_model
-from config.settings import READINESS_THRESHOLDS
+from Kistmath_AI.utils.data_generation import generate_dataset
+from Kistmath_AI.utils.evaluation import evaluate_readiness
+from Kistmath_AI.training.parallel_training import parallel_train_model
+from Kistmath_AI.config.settings import READINESS_THRESHOLDS
 
 def smooth_curriculum_learning(model, stages, initial_problems=4000, max_problems=5000, difficulty_increase_rate=0.05, plot_queue=None):
     all_history = []
