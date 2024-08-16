@@ -2,14 +2,14 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import tensorflow as tf
-from models.kistmat_ai import Kistmat_AI
-from training.curriculum_learning import smooth_curriculum_learning
-from utils.data_generation import generate_dataset
-from utils.evaluation import evaluate_readiness
-from utils.tokenization import tokenize_calculus_problem
-from training.parallel_training import parallel_reinforce_learning
-from visualization.plotting import plot_learning_curves, real_time_plotter
-from config.settings import STAGES, MAX_LENGTH, READINESS_THRESHOLDS
+from Kistmath_AI.models.kistmat_ai import Kistmat_AI
+from Kistmath_AI.training.curriculum_learning import smooth_curriculum_learning
+from Kistmath_AI.utils.data_generation import generate_dataset
+from Kistmath_AI.utils.evaluation import evaluate_readiness
+from Kistmath_AI.utils.tokenization import tokenize_calculus_problem
+from Kistmath_AI.training.parallel_training import parallel_reinforce_learning
+from Kistmath_AI.visualization.plotting import plot_learning_curves, real_time_plotter
+from Kistmath_AI.config.settings import STAGES, MAX_LENGTH, READINESS_THRESHOLDS
 import multiprocessing
 import numpy as np
 

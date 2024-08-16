@@ -1,5 +1,5 @@
 import numpy as np
-from utils.tokenization import tokenize_problem, tokenize_calculus_problem
+from Kistmath_AI.utils.tokenization import tokenize_problem, tokenize_calculus_problem
 
 def evaluate_readiness(model, problems, threshold):
     model.compile(optimizer='adam', loss='mse', metrics=['mae'])
