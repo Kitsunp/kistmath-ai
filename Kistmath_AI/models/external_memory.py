@@ -31,3 +31,53 @@ class ExternalMemory:
         
         # Decay usage
         self.usage.assign(self.usage * 0.99)
+
+class FormulativeMemory:
+    def __init__(self):
+        self.formulas = []
+
+    def add_formula(self, formula):
+        self.formulas.append(formula)
+
+    def get_formulas(self):
+        return self.formulas
+
+class ConceptualMemory:
+    def __init__(self):
+        self.concepts = {}
+
+    def add_concept(self, key, concept):
+        self.concepts[key] = concept
+
+    def get_concept(self, key):
+        return self.concepts.get(key, None)
+
+class ShortTermMemory:
+    def __init__(self):
+        self.memory = []
+
+    def add_memory(self, data):
+        self.memory.append(data)
+
+    def get_memory(self):
+        return self.memory
+
+class LongTermMemory:
+    def __init__(self):
+        self.memory = []
+
+    def add_memory(self, data):
+        self.memory.append(data)
+
+    def get_memory(self):
+        return self.memory
+
+class InferenceMemory:
+    def __init__(self):
+        self.inferences = []
+
+    def add_inference(self, inference):
+        self.inferences.append(inference)
+
+    def get_inferences(self):
+        return self.inferences

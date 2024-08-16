@@ -3,7 +3,7 @@ tf.config.run_functions_eagerly(True)
 from tensorflow import keras
 from keras import ops
 from tensorflow.keras.utils import register_keras_serializable
-from models.external_memory import ExternalMemory
+from models.external_memory import ExternalMemory, FormulativeMemory, ConceptualMemory, ShortTermMemory, LongTermMemory, InferenceMemory
 from config.settings import VOCAB_SIZE, MAX_LENGTH
 import sys
 import os
@@ -110,3 +110,33 @@ class Kistmat_AI(keras.Model):
         instance = cls(input_shape=input_shape, output_shape=output_shape, vocab_size=vocab_size, **config)
         instance.set_learning_stage(learning_stage)
         return instance
+
+    def add_formula(self, formula):
+        self.formulative_memory.add_formula(formula)
+
+    def get_formulas(self):
+        return self.formulative_memory.get_formulas()
+
+    def add_concept(self, key, concept):
+        self.conceptual_memory.add_concept(key, concept)
+
+    def get_concept(self, key):
+        return self.conceptual_memory.get_concept(key)
+
+    def add_short_term_memory(self, data):
+        self.short_term_memory.add_memory(data)
+
+    def get_short_term_memory(self):
+        return self.short_term_memory.get_memory()
+
+    def add_long_term_memory(self, data):
+        self.long_term_memory.add_memory(data)
+
+    def get_long_term_memory(self):
+        return self.long_term_memory.get_memory()
+
+    def add_inference(self, inference):
+        self.inference_memory.add_inference(inference)
+
+    def get_inferences(self):
+        return self.inference_memory.get_inferences()

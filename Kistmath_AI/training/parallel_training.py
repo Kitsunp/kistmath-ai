@@ -20,7 +20,10 @@ def train_fold(fold_data):
         y_train_imag = np.array([p.solution.imag for p in train_problems])
         y_train = np.column_stack((y_train_real, y_train_imag))
     
-    history = model.fit(X_train, y_train, epochs=epochs, batch_size=64, validation_split=0.2, verbose=0)
+    # Ensure smooth transition between epochs
+    for epoch in range(epochs):
+        history = model.fit(X_train, y_train, epochs=1, batch_size=64, validation_split=0.2, verbose=0)
+        model.save_weights(f'temp_weights_epoch_{epoch}.h5')
     
     return {'history': history.history, 'weights': model.get_weights()}
 
