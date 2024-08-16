@@ -379,14 +379,16 @@ def train_model(model, problems, epochs=10):
         verbose=1
     )
 
-    history = model.fit(
-        X_train, y_train,
-        epochs=epochs,
-        batch_size=64,
-        validation_split=0.2,
-        verbose=1,
-        callbacks=[early_stopping, model_checkpoint, lr_scheduler]
-    )
+    for epoch in range(epochs):
+        history = model.fit(
+            X_train, y_train,
+            epochs=1,
+            batch_size=64,
+            validation_split=0.2,
+            verbose=1,
+            callbacks=[early_stopping, model_checkpoint, lr_scheduler]
+        )
+        model.save_weights(f'temp_weights_epoch_{epoch}.h5')
 
     return history
 
