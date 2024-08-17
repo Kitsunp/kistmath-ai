@@ -65,7 +65,6 @@ class Kistmat_AI(keras.Model):
         self._learning_stage = tf.Variable('elementary1', trainable=False, dtype=tf.string)
     def get_learning_stage(self):
         return self._learning_stage.numpy().decode()
-
     def set_learning_stage(self, stage):
         self._learning_stage.assign(stage.encode())
     @tf.function
@@ -94,9 +93,11 @@ class Kistmat_AI(keras.Model):
             important_memories = self.long_term_memory.query_important_memories(query)
             confident_inferences = self.inference_memory.query_confident_inferences(query)
 
-            # Combine all memory outputs
-            all_memory_outputs = [memory_output, similar_formulas, similar_concepts, recent_memories, important_memories, confident_inferences]
-            combined_memory = tf.concat(all_memory_outputs, axis=-1)
+            # Ensure all memory outputs have the same shape
+            memory_outputs = [memory_output, similar_formulas, similar_concepts, recent_memories, important_memories, confident_inferences]
+            memory_outputs = [tf.expand_dims(m, axis=1) if len(m.shape) == 2 else m for m in memory_outputs]
+            combined_memory = tf.concat(memory_outputs, axis=1)
+            combined_memory = tf.reduce_mean(combined_memory, axis=1)
 
             x = tf.concat([context, combined_memory], axis=-1)
 
@@ -104,8 +105,7 @@ class Kistmat_AI(keras.Model):
 
         if training:
             # Update all memory components
-            key = tf.reduce_sum(tf.cast(inputs, tf.float32), axis=-1, keepdims=True)
-            self.update_memories(key, x)
+            self.update_memories(inputs, x)
 
         x = self.batch_norm(x)
 
@@ -143,8 +143,11 @@ class Kistmat_AI(keras.Model):
         instance.set_learning_stage(learning_stage)
         return instance
 
-    def add_formula(self, formula):
-        self.formulative_memory.add_formula(formula)
+    def add_formula(self, formula: tf.Tensor) -> None:
+        # Convert tensor to fixed-size embedding
+        embedding = tf.reduce_mean(formula, axis=-1)
+        embedding = tf.reshape(embedding, [1, 64])
+        self.formula_embeddings = tf.concat([self.formula_embeddings, embedding], axis=0)
 
     def solve_problem(self, problem):
         if isinstance(problem, str):  # Assuming string problems are symbolic
@@ -177,8 +180,12 @@ class Kistmat_AI(keras.Model):
     def get_inferences(self):
         return self.inference_memory.get_inferences()
 
-    def query_similar_formulas(self, query, top_k=5):
-        return self.formulative_memory.query_similar_formulas(query, top_k)
+    def query_similar_formulas(self, query: tf.Tensor, top_k: int = 5) -> tf.Tensor:
+        query_embedding = tf.reduce_mean(query, axis=-1)
+        query_embedding = tf.reshape(query_embedding, [1, 64])
+        similarities = tf.matmul(query_embedding, self.formula_embeddings, transpose_b=True)
+        _, top_indices = tf.nn.top_k(similarities[0], k=top_k)
+        return tf.gather(self.formula_embeddings, top_indices)
 
     def query_similar_concepts(self, query, top_k=5):
         return self.conceptual_memory.query_similar_concepts(query, top_k)
@@ -192,27 +199,22 @@ class Kistmat_AI(keras.Model):
     def query_confident_inferences(self, query, top_k=5):
         return self.inference_memory.query_confident_inferences(query, top_k)
     def query_formulative_memory(self, query):
-        # Convert query tensor to string representation
-        query_str = tf.strings.as_string(tf.reduce_sum(query, axis=-1))
-        query_str = tf.strings.as_string(tf.reduce_sum(query, axis=-1))
-        similar_formulas = self.formulative_memory.query_similar_formulas(query_str.numpy().decode())
-        return tf.concat(similar_formulas, axis=0)
+        # Convert query tensor to a fixed-size embedding
+        query_embedding = tf.reduce_mean(query, axis=-1)
+        query_embedding = tf.reshape(query_embedding, [1, 64])
+        similar_formulas = self.formulative_memory.query_similar_formulas(query_embedding)
+        return similar_formulas
     def query_conceptual_memory(self, query):
-        # Convert query tensor to string representation
-        query_str = tf.strings.as_string(tf.reduce_sum(query, axis=-1))
-        similar_concepts = self.conceptual_memory.query_similar_concepts(query_str)
-        return tf.concat(similar_concepts, axis=0)
+        similar_concepts = self.conceptual_memory.query_similar_concepts(query)
+        return similar_concepts
 
     def update_memories(self, key, x):
-        key_str = tf.strings.as_string(key)
-        self.conceptual_memory.add_concept(key_str.decode(), x.numpy())
-        self.formulative_memory.add_formula(key_str)
+        self.conceptual_memory.add_concept(key, x)
+        self.formulative_memory.add_formula(key)
         self.short_term_memory.add_memory(x)
         
-        # Calculate importance for long-term memory
         importance = tf.reduce_mean(tf.abs(x))
-        self.long_term_memory.add_memory(x, importance=importance.numpy())
+        self.long_term_memory.add_memory(x, importance=importance)
         
-        # Calculate confidence for inference memory
-        confidence = tf.nn.sigmoid(tf.reduce_mean(x)).numpy()
+        confidence = tf.nn.sigmoid(tf.reduce_mean(x))
         self.inference_memory.add_inference(x, confidence=confidence)

@@ -44,59 +44,40 @@ class ExternalMemory:
 
 class FormulativeMemory:
     def __init__(self, max_formulas: int = 1000):
-        self.formulas = []
         self.max_formulas = max_formulas
         self.formula_embeddings = tf.Variable(tf.zeros([0, 64], dtype=tf.float32))
 
-    def add_formula(self, formula: str) -> None:
-        if len(self.formulas) >= self.max_formulas:
-            self.formulas.pop(0)
+    def add_formula(self, formula: tf.Tensor) -> None:
+        if tf.shape(self.formula_embeddings)[0] >= self.max_formulas:
             self.formula_embeddings = tf.Variable(self.formula_embeddings[1:])
         
-        self.formulas.append(formula)
-        
-        # Create a simple embedding for the formula
-        embedding = tf.strings.to_hash_bucket_fast(tf.constant([formula]), num_buckets=64)
-        embedding = tf.cast(embedding, tf.float32) / 64.0
+        # Convert formula tensor to a fixed-size embedding
+        embedding = tf.reduce_mean(formula, axis=-1)
+        embedding = tf.reshape(embedding, [1, 64])
         self.formula_embeddings = tf.concat([self.formula_embeddings, embedding], axis=0)
 
-    def get_formulas(self) -> List[str]:
-        return self.formulas
-
-    def query_similar_formulas(self, query: str, top_k: int = 5) -> List[str]:
-        query_embedding = tf.strings.to_hash_bucket_fast(tf.constant([query]), num_buckets=64)
-        query_embedding = tf.cast(query_embedding, tf.float32) / 64.0
-        
-        similarities = tf.matmul(query_embedding, self.formula_embeddings, transpose_b=True)
-        _, top_indices = tf.nn.top_k(similarities[0], k=top_k)
-        
-        return [self.formulas[i] for i in top_indices.numpy()]
+    def query_similar_formulas(self, query: tf.Tensor, top_k: int = 5) -> tf.Tensor:
+        similarities = tf.matmul(query, self.formula_embeddings, transpose_b=True)
+        _, top_indices = tf.nn.top_k(similarities[0], k=min(top_k, tf.shape(self.formula_embeddings)[0]))
+        return tf.gather(self.formula_embeddings, top_indices)
 
 class ConceptualMemory:
     def __init__(self):
         self.concepts = {}
-        self.concept_embeddings = {}
+        self.concept_embeddings = tf.Variable(tf.zeros([0, 64], dtype=tf.float32))
 
-    def add_concept(self, key: str, concept: Any) -> None:
-        self.concepts[key] = concept
-        
-        # Create a simple embedding for the concept
-        embedding = tf.strings.to_hash_bucket_fast(tf.constant([key]), num_buckets=64)
-        self.concept_embeddings[key] = tf.cast(embedding, tf.float32) / 64.0
+    def add_concept(self, key: tf.Tensor, concept: tf.Tensor) -> None:
+        key_embedding = tf.reduce_mean(key, axis=-1)
+        key_embedding = tf.reshape(key_embedding, [1, 64])
+        self.concept_embeddings = tf.concat([self.concept_embeddings, key_embedding], axis=0)
+        self.concepts[tf.reduce_sum(key_embedding).numpy()] = concept
 
-    def get_concept(self, key: str) -> Any:
-        return self.concepts.get(key)
-
-    def query_similar_concepts(self, query: str, top_k: int = 5) -> List[str]:
-        query_embedding = tf.strings.to_hash_bucket_fast(tf.constant([query]), num_buckets=64)
-        query_embedding = tf.cast(query_embedding, tf.float32) / 64.0
-        
-        similarities = {}
-        for key, embedding in self.concept_embeddings.items():
-            similarities[key] = tf.reduce_sum(query_embedding * embedding)
-        
-        sorted_concepts = sorted(similarities.items(), key=lambda x: x[1], reverse=True)
-        return [key for key, _ in sorted_concepts[:top_k]]
+    def query_similar_concepts(self, query: tf.Tensor, top_k: int = 5) -> tf.Tensor:
+        query_embedding = tf.reduce_mean(query, axis=-1)
+        query_embedding = tf.reshape(query_embedding, [1, 64])
+        similarities = tf.matmul(query_embedding, self.concept_embeddings, transpose_b=True)
+        _, top_indices = tf.nn.top_k(similarities[0], k=min(top_k, tf.shape(self.concept_embeddings)[0]))
+        return tf.gather(self.concept_embeddings, top_indices)
 
 class ShortTermMemory:
     def __init__(self, capacity: int = 100):
@@ -111,10 +92,10 @@ class ShortTermMemory:
     def get_memory(self) -> List[tf.Tensor]:
         return self.memory
 
-    def query_recent_memories(self, query: tf.Tensor, top_k: int = 5) -> List[tf.Tensor]:
-        similarities = [tf.reduce_sum(query * mem) for mem in self.memory]
-        sorted_indices = np.argsort(similarities)[::-1]
-        return [self.memory[i] for i in sorted_indices[:top_k]]
+    def query_recent_memories(self, query: tf.Tensor, top_k: int = 5) -> tf.Tensor:
+        similarities = tf.stack([tf.reduce_sum(query * mem) for mem in self.memory])
+        _, top_indices = tf.nn.top_k(similarities, k=min(top_k, len(self.memory)))
+        return tf.gather(self.memory, top_indices)
 
 class LongTermMemory:
     def __init__(self, capacity: int = 10000):
@@ -135,10 +116,10 @@ class LongTermMemory:
     def get_memory(self) -> List[tf.Tensor]:
         return self.memory
 
-    def query_important_memories(self, query: tf.Tensor, top_k: int = 5) -> List[tf.Tensor]:
-        similarities = [tf.reduce_sum(query * mem) * imp for mem, imp in zip(self.memory, self.importance_scores)]
-        sorted_indices = np.argsort(similarities)[::-1]
-        return [self.memory[i] for i in sorted_indices[:top_k]]
+    def query_important_memories(self, query: tf.Tensor, top_k: int = 5) -> tf.Tensor:
+        similarities = tf.stack([tf.reduce_sum(query * mem) * imp for mem, imp in zip(self.memory, self.importance_scores)])
+        _, top_indices = tf.nn.top_k(similarities, k=min(top_k, len(self.memory)))
+        return tf.gather(self.memory, top_indices)
 
 class InferenceMemory:
     def __init__(self, capacity: int = 500):
@@ -159,7 +140,7 @@ class InferenceMemory:
     def get_inferences(self) -> List[tf.Tensor]:
         return self.inferences
 
-    def query_confident_inferences(self, query: tf.Tensor, top_k: int = 5) -> List[tf.Tensor]:
-        similarities = [tf.reduce_sum(query * inf) * conf for inf, conf in zip(self.inferences, self.confidence_scores)]
-        sorted_indices = np.argsort(similarities)[::-1]
-        return [self.inferences[i] for i in sorted_indices[:top_k]]
+    def query_confident_inferences(self, query: tf.Tensor, top_k: int = 5) -> tf.Tensor:
+        similarities = tf.stack([tf.reduce_sum(query * inf) * conf for inf, conf in zip(self.inferences, self.confidence_scores)])
+        _, top_indices = tf.nn.top_k(similarities, k=min(top_k, len(self.inferences)))
+        return tf.gather(self.inferences, top_indices)
