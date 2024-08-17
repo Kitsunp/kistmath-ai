@@ -2,10 +2,15 @@ from Kistmath_AI.utils.data_generation import generate_dataset
 from Kistmath_AI.utils.evaluation import evaluate_readiness
 from Kistmath_AI.training.parallel_training import parallel_train_model
 from Kistmath_AI.config.settings import READINESS_THRESHOLDS
+from Kistmath_AI.visualization.real_time_plotter import RealTimePlotter
+from Kistmath_AI.visualization.real_time_plotter import RealTimePlotter
 
-def smooth_curriculum_learning(model, stages, initial_problems=4000, max_problems=5000, difficulty_increase_rate=0.05, plot_queue=None):
+def smooth_curriculum_learning(model, stages, initial_problems=4000, max_problems=5000, difficulty_increase_rate=0.05):
     all_history = []
     current_difficulty = 1.0
+
+    plotter = RealTimePlotter()
+    plotter.after(100, plotter.update)  # Start the Tkinter loop
 
     for stage in stages:
         print(f"\nEntering learning stage: {stage}")
@@ -19,9 +24,16 @@ def smooth_curriculum_learning(model, stages, initial_problems=4000, max_problem
             problems = generate_dataset(num_problems, stage, current_difficulty)
 
             fold_histories = parallel_train_model(model, problems, epochs=50)
-            
+
+            # Update real-time plot with fold history loss data
+            for history in fold_histories:
+                for loss in history['history']['loss']:
+                    plotter.update_plot(loss)
+                    plotter.update_idletasks()
+                    plotter.update()
+
             model.set_weights(fold_histories[-1]['weights'])
-            
+
             stage_history.extend(fold_histories)
 
             val_problems = problems[-len(problems)//5:]
@@ -43,4 +55,6 @@ def smooth_curriculum_learning(model, stages, initial_problems=4000, max_problem
 
         current_difficulty = max(1.0, current_difficulty - 0.5)
 
+    plotter.destroy()  # Close the Tkinter window when done
+    
     return all_history
