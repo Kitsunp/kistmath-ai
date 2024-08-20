@@ -1,10 +1,10 @@
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.utils import register_keras_serializable
-
-from Kistmath_AI.models.external_memory import ExternalMemory, FormulativeMemory, ConceptualMemory, ShortTermMemory, LongTermMemory, InferenceMemory
-from Kistmath_AI.config.settings import VOCAB_SIZE, MAX_LENGTH
-from Kistmath_AI.models.symbolic_reasoning import SymbolicReasoning
+import numpy as np
+from external_memory import IntegratedMemorySystem
+from settings import VOCAB_SIZE, MAX_LENGTH
+from symbolic_reasoning import SymbolicReasoning
 
 @register_keras_serializable(package='Custom', name=None)
 class Kistmat_AI(keras.Model):
@@ -32,12 +32,15 @@ class Kistmat_AI(keras.Model):
         self.batch_norm = keras.layers.BatchNormalization()
 
     def _init_memory_components(self):
-        self.external_memory = ExternalMemory(memory_size=100, key_size=64, value_size=128)
-        self.formulative_memory = FormulativeMemory(max_formulas=1000)
-        self.conceptual_memory = ConceptualMemory()
-        self.short_term_memory = ShortTermMemory(capacity=100)
-        self.long_term_memory = LongTermMemory(capacity=10000)
-        self.inference_memory = InferenceMemory(capacity=500, embedding_size=64)
+        self.memory_system = IntegratedMemorySystem({
+            'external_memory': {'memory_size': 100, 'key_size': 64, 'value_size': 128},
+            'formulative_memory': {'max_formulas': 1000},
+            'conceptual_memory': {},
+            'short_term_memory': {'capacity': 100},
+        
+            'long_term_memory': {'capacity': 10000},
+            'inference_memory': {'capacity': 500, 'embedding_size': 64}
+        })
 
     def _init_output_layers(self):
         stages = ['elementary1', 'elementary2', 'elementary3', 'junior_high1', 'junior_high2', 
@@ -46,7 +49,7 @@ class Kistmat_AI(keras.Model):
         self.final_output = keras.layers.Dense(self.output_shape, activation='sigmoid')
 
     def get_learning_stage(self):
-        return self._learning_stage.numpy().decode()
+        return tf.strings.strip(self._learning_stage)
 
     def set_learning_stage(self, stage):
         self._learning_stage.assign(stage.encode())
@@ -77,13 +80,22 @@ class Kistmat_AI(keras.Model):
 
     def _query_memories(self, x):
         query = self.memory_query(x)
+        memory_results = self.memory_system.process_input({
+            'external_query': query,
+            'formulative_query': (query, self._extract_relevant_terms(query)),
+            'conceptual_query': query,
+            'short_term_query': query,
+            'long_term_query': query,
+            'inference_query': query
+        })
+        
         memory_outputs = [
-            self.external_memory.query(query),
-            self.query_formulative_memory(query),
-            self.query_conceptual_memory(query),
-            self.short_term_memory.query_recent_memories(query),
-            self.long_term_memory.query_important_memories(query),
-            self.inference_memory.query_confident_inferences(query)
+            memory_results['external_memory'],
+            memory_results['formulative_memory'],
+            memory_results['conceptual_memory'],
+            memory_results['short_term_memory'],
+            memory_results['long_term_memory'],
+            memory_results['inference_memory']
         ]
         memory_outputs = [tf.expand_dims(m, axis=1) if len(m.shape) == 2 else m for m in memory_outputs]
         combined_memory = tf.concat(memory_outputs, axis=1)
@@ -92,14 +104,49 @@ class Kistmat_AI(keras.Model):
     def _apply_reasoning(self, x, training):
         x = self.reasoning_layer(x)
         if training:
-            self.update_memories(x, x)
+            self._update_memories(x)
         return self.batch_norm(x)
 
     def _generate_output(self, x, current_stage, training):
         x = self.output_layers[current_stage](x)
         if training and current_stage != 'university':
-            self.external_memory.update(self.memory_query(x), x)
+            self._update_memories(x)
         return self.final_output(x)
+
+    def _update_memories(self, x):
+        update_data = {
+            'external_memory': {'data': (self.memory_query(x), x)},
+            'formulative_memory': {'data': (x, self._extract_relevant_terms(x))},
+            'conceptual_memory': {'data': (self.memory_query(x), x)},
+            'short_term_memory': {'data': x},
+            'long_term_memory': {'data': x, 'metadata': {'importance': tf.reduce_mean(tf.abs(x))}},
+            'inference_memory': {'data': (x, tf.nn.sigmoid(tf.reduce_mean(x)))}
+        }
+        self.memory_system.update_memories(update_data)
+
+    def _extract_relevant_terms(self, query):
+        current_stage = self.get_learning_stage()
+        
+        def extract_terms(term_indices):
+            return tf.reduce_sum(tf.gather(query, term_indices, axis=-1), axis=-1)
+
+        elementary_indices = [0, 1, 2, 3, 4, 5]  # Indices corresponding to elementary terms
+        junior_high_indices = [6, 7, 8, 9, 10, 11]  # Indices for junior high terms
+        high_school_indices = [12, 13, 14, 15, 16, 17]  # Indices for high school terms
+        university_indices = [18, 19, 20, 21, 22, 23]  # Indices for university terms
+
+        return tf.switch_case(
+            tf.math.logical_or(
+                tf.equal(current_stage, 'elementary1'),
+                tf.math.logical_or(
+                    tf.equal(current_stage, 'elementary2'),
+                    tf.equal(current_stage, 'elementary3')
+                )
+            ), {
+                0: lambda: extract_terms(elementary_indices),
+                1: lambda: extract_terms(junior_high_indices),
+                2: lambda: extract_terms(high_school_indices)
+            }, default=lambda: extract_terms(university_indices))
 
     def get_config(self):
         config = super().get_config()
@@ -126,107 +173,8 @@ class Kistmat_AI(keras.Model):
         if isinstance(problem, str):  # Assuming string problems are symbolic
             return self.symbolic_reasoning.solve_equation(problem)
 
-    def add_formula(self, formula: tf.Tensor, terms: list) -> None:
-        self.formulative_memory.add_formula(formula, terms)
+    def save_memory_state(self, directory: str) -> None:
+        self.memory_system.save_state(directory)
 
-    def query_similar_formulas(self, query: tf.Tensor, query_terms: list, top_k: int = 5) -> tf.Tensor:
-        return self.formulative_memory.query_similar_formulas(query, query_terms, top_k)
-
-    def get_formula_terms(self, index: int) -> list:
-        return self.formulative_memory.get_formula_terms(index)
-
-    def add_concept(self, key: tf.Tensor, concept: tf.Tensor) -> None:
-        self.conceptual_memory.add_concept(key, concept)
-
-    def get_concept(self, key_embedding: tf.Tensor) -> tf.Tensor:
-        return self.conceptual_memory.get_concept(key_embedding)
-
-    def query_similar_concepts(self, query: tf.Tensor, top_k: int = 5) -> tf.Tensor:
-        return self.conceptual_memory.query_similar_concepts(query, top_k)
-
-    def add_short_term_memory(self, data: tf.Tensor) -> None:
-        self.short_term_memory.add_memory(data)
-
-    def get_short_term_memory(self) -> list:
-        return self.short_term_memory.get_memory()
-
-    def query_recent_memories(self, query: tf.Tensor, top_k: int = 5) -> tf.Tensor:
-        return self.short_term_memory.query_recent_memories(query, top_k)
-
-    def add_long_term_memory(self, data: tf.Tensor, importance: float = 1.0) -> None:
-        self.long_term_memory.add_memory(data, importance)
-
-    def get_long_term_memory(self) -> list:
-        return self.long_term_memory.get_memory()
-
-    def query_important_memories(self, query: tf.Tensor, top_k: int = 5) -> tf.Tensor:
-        return self.long_term_memory.query_important_memories(query, top_k)
-
-    def add_inference(self, inference: tf.Tensor, confidence: float = 0.8) -> None:
-        self.inference_memory.add_inference(inference, confidence)
-
-    def get_inferences(self) -> list:
-        return self.inference_memory.get_inferences()
-
-    def query_confident_inferences(self, query: tf.Tensor, top_k: int = 5) -> tf.Tensor:
-        return self.inference_memory.query_confident_inferences(query, top_k)
-
-    def query_formulative_memory(self, query):
-        # Convert query tensor to a fixed-size embedding
-        query_embedding = tf.reduce_mean(query, axis=-1)
-        
-        # Adjust the reshape operation based on the actual shape of query_embedding
-        query_shape = tf.shape(query_embedding)
-        query_embedding = tf.reshape(query_embedding, [query_shape[0], -1])
-        
-        # Check if formula_embeddings is empty
-        if tf.shape(self.formulative_memory.formula_embeddings)[0] == 0:
-            # Return a placeholder tensor of the correct shape if empty
-            return tf.zeros([query_shape[0], 64], dtype=tf.float32)
-
-        # Extract relevant terms from the query
-        relevant_terms = self._extract_relevant_terms(query)
-        
-        # Query the formulative memory
-        similar_formulas = self.formulative_memory.query_similar_formulas(query_embedding, relevant_terms)
-        
-        return similar_formulas
-
-    def _extract_relevant_terms(self, query):
-        # This is a placeholder for more sophisticated term extraction
-        current_stage = self.get_learning_stage()
-        
-        if current_stage in ['elementary1', 'elementary2', 'elementary3']:
-            basic_math_terms = ['add', 'subtract', 'multiply', 'divide', 'number', 'equal']
-            return [term for term in basic_math_terms if term in tf.strings.lower(query)]
-        
-        elif current_stage in ['junior_high1', 'junior_high2']:
-            algebra_terms = ['variable', 'equation', 'function', 'graph', 'slope', 'intercept']
-            return [term for term in algebra_terms if term in tf.strings.lower(query)]
-        
-        elif current_stage in ['high_school1', 'high_school2', 'high_school3']:
-            advanced_math_terms = ['derivative', 'integral', 'limit', 'vector', 'matrix', 'probability']
-            return [term for term in advanced_math_terms if term in tf.strings.lower(query)]
-        
-        else:  # university
-            all_math_terms = ['theorem', 'proof', 'algorithm', 'optimization', 'analysis', 'topology']
-            return [term for term in all_math_terms if term in tf.strings.lower(query)]
-
-
-    def query_conceptual_memory(self, query):
-        similar_concepts = self.conceptual_memory.query_similar_concepts(query)
-        return similar_concepts
-
-    def update_memories(self, key, x):
-        self.add_concept(key, x)
-        self.add_formula(key, ["term1", "term2", "term3"])  # Using dummy terms
-        self.add_short_term_memory(x)
-        
-        importance = tf.reduce_mean(tf.abs(x))
-        self.add_long_term_memory(x, importance=importance)
-        
-        confidence = tf.nn.sigmoid(tf.reduce_mean(x))
-        self.add_inference(x, confidence=confidence)
-
-    def get_memory_state(self):
-        return self.external_memory.get_memory_state()
+    def load_memory_state(self, directory: str) -> None:
+        self.memory_system.load_state(directory)
