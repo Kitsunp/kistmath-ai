@@ -2,9 +2,9 @@ import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras.utils import register_keras_serializable
 import numpy as np
-from external_memory import IntegratedMemorySystem
-from settings import VOCAB_SIZE, MAX_LENGTH
-from symbolic_reasoning import SymbolicReasoning
+from .external_memory import IntegratedMemorySystem
+from .settings import VOCAB_SIZE, MAX_LENGTH
+from .symbolic_reasoning import SymbolicReasoning
 
 @register_keras_serializable(package='Custom', name=None)
 class Kistmat_AI(keras.Model):
