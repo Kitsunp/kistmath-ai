@@ -7,6 +7,7 @@ import pickle
 import logging
 from abc import ABC, abstractmethod
 
+tf.data.experimental.enable_debug_mode()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,14 @@ class MemoryComponent(ABC):
 
     @abstractmethod
     def load(self, filepath: str) -> None:
+        pass
+
+    @abstractmethod
+    def get_shareable_data(self) -> Dict[str, Any]:
+        pass
+
+    @abstractmethod
+    def update_from_shared_data(self, shared_data: Dict[str, Any]) -> None:
         pass
 
 class BTreeNode:
@@ -79,18 +88,18 @@ class BTree(MemoryComponent):
                     i += 1
             self._insert_non_full(x.children[i], k)
 
-    def search(self, k: float, x: Optional[BTreeNode] = None) -> Any:
+    def search(self, k: tf.Tensor, x: Optional[BTreeNode] = None) -> tf.Tensor:
         if x is None:
             x = self.root
         i = 0
-        while i < len(x.keys) and k > x.keys[i][0]:
+        while i < len(x.keys) and k[0] > x.keys[i][0]:
             i += 1
-        if i < len(x.keys) and k == x.keys[i][0]:
+        if i < len(x.keys) and tf.equal(k[0], x.keys[i][0]):
             return x.keys[i][1]
         elif x.leaf:
             return None
         else:
-            return self.search(k, x.children[i])
+            return self.search(k[0], x.children[i])
 
     def add(self, data: Tuple[float, Any], metadata: Optional[Dict] = None) -> None:
         self.insert(data)
@@ -100,14 +109,39 @@ class BTree(MemoryComponent):
         return [result] if result is not None else []
 
     def save(self, filepath: str) -> None:
+        import pickle
         with open(filepath, 'wb') as f:
             pickle.dump(self, f)
 
     def load(self, filepath: str) -> None:
+        import pickle
         with open(filepath, 'rb') as f:
             loaded_tree = pickle.load(f)
             self.__dict__.update(loaded_tree.__dict__)
 
+    def get_shareable_data(self) -> Dict[str, Any]:
+        return {
+            'root': self._serialize_node(self.root),
+            't': self.t
+        }
+
+    def update_from_shared_data(self, shared_data: Dict[str, Any]) -> None:
+        self.t = shared_data['t']
+        self.root = self._deserialize_node(shared_data['root'])
+
+    def _serialize_node(self, node: BTreeNode) -> Dict[str, Any]:
+        return {
+            'leaf': node.leaf,
+            'keys': node.keys,
+            'children': [self._serialize_node(child) for child in node.children] if not node.leaf else []
+        }
+
+    def _deserialize_node(self, data: Dict[str, Any]) -> BTreeNode:
+        node = BTreeNode(data['leaf'])
+        node.keys = data['keys']
+        node.children = [self._deserialize_node(child) for child in data['children']] if not data['leaf'] else []
+        return node
+    
 class ExternalMemory(MemoryComponent):
     def __init__(self, memory_size: int = 100, key_size: int = 64, value_size: int = 128):
         self.memory_size = memory_size
@@ -115,6 +149,7 @@ class ExternalMemory(MemoryComponent):
         self.value_size = value_size
         self.btree = BTree(t=5)
         self.usage = tf.Variable(tf.zeros([memory_size], dtype=tf.float32))
+        self.memory_embeddings = tf.Variable(tf.zeros([memory_size, value_size], dtype=tf.float32))  # Add this line
 
     def add(self, data: Tuple[tf.Tensor, tf.Tensor], metadata: Optional[Dict] = None) -> None:
         key, value = data
@@ -125,24 +160,65 @@ class ExternalMemory(MemoryComponent):
             key_sum = tf.reduce_sum(key[i])
             self.btree.insert((key_sum.numpy(), value[i].numpy()))
         
+        # Update memory_embeddings
+        current_size = tf.shape(self.memory_embeddings)[0]
+        new_size = tf.minimum(self.memory_size, current_size + tf.shape(value)[0])
+        self.memory_embeddings = tf.Variable(tf.concat([self.memory_embeddings[:new_size - tf.shape(value)[0]], value[:new_size - current_size]], axis=0))
+        
         self._update_usage()
-
-    def query(self, query_key: tf.Tensor, top_k: int = 1) -> tf.Tensor:
-        query_key = tf.ensure_shape(query_key, [None, self.key_size])
-        results = []
-        for key in query_key:
-            key_sum = tf.reduce_sum(key)
-            value = self.btree.search(key_sum.numpy())
-            results.append(value if value is not None else tf.zeros([self.value_size], dtype=tf.float32))
+    def query(self, query_embedding: tf.Tensor, query_terms: Optional[tf.Tensor] = None, top_k: int = 5) -> Tuple[tf.Tensor, tf.Tensor]:
+        if tf.equal(tf.shape(self.memory_embeddings)[0], 0):  # Change this line
+            return tf.zeros([0, self.value_size], dtype=tf.float32), tf.constant([], dtype=tf.int32)
         
-        retrieved_values = tf.stack(results)
-        self._update_usage(retrieved_values)
+        if query_terms is None:
+            # Si no se proporcionan query_terms, usar todos los índices disponibles
+            candidate_indices = tf.range(tf.shape(self.formula_embeddings)[0])
+        else:
+            query_terms = tf.strings.lower(tf.strings.strip(query_terms))
+            
+            def check_term(term):
+                return tf.reduce_any(tf.equal(tf.constant(list(self.inverted_index.keys())), term))
+            
+            mask = tf.map_fn(check_term, query_terms, dtype=tf.bool)
+            valid_terms = tf.boolean_mask(query_terms, mask)
+            
+            def get_indices(term):
+                return tf.constant(self.inverted_index[term.numpy().decode('utf-8')], dtype=tf.int32)
+            
+            candidate_indices = tf.map_fn(get_indices, valid_terms, dtype=tf.int32)
+            candidate_indices = tf.unique(tf.reshape(candidate_indices, [-1])).y
         
-        return retrieved_values
-
+        if tf.equal(tf.size(candidate_indices), 0):
+            return tf.zeros([0, self.embedding_size], dtype=tf.float32), tf.constant([], dtype=tf.int32)
+        
+        candidate_embeddings = tf.gather(self.formula_embeddings, candidate_indices)
+        
+        similarities = tf.matmul(tf.reshape(query_embedding, [1, -1]), candidate_embeddings, transpose_b=True)
+        top_k = tf.minimum(top_k, tf.shape(candidate_embeddings)[0])
+        _, top_indices = tf.nn.top_k(similarities[0], k=top_k)
+        
+        result_indices = tf.gather(candidate_indices, top_indices)
+        return tf.gather(candidate_embeddings, top_indices), result_indices
+    def get_formula_terms(self, index: int) -> List[str]:
+        try:
+            return self.formula_terms[index]
+        except IndexError as e:
+            logger.error(f"Error en get_formula_terms: Índice {index} fuera de rango")
+            return []
+        except Exception as e:
+            logger.error(f"Error inesperado en get_formula_terms: {e}")
+            return []
+            
     def _update_usage(self, retrieved_values: Optional[tf.Tensor] = None) -> None:
         if retrieved_values is not None:
-            self.usage.assign_add(tf.reduce_sum(tf.cast(tf.not_equal(retrieved_values, 0), tf.float32), axis=-1))
+            batch_size = tf.shape(retrieved_values)[0]
+            usage_update = tf.reduce_sum(tf.cast(tf.not_equal(retrieved_values, 0), tf.float32), axis=-1)
+            
+            # Asegurarse de que usage_update tenga la misma forma que self.usage
+            usage_update = tf.reduce_mean(usage_update)
+            usage_update = tf.repeat(usage_update, self.memory_size)
+            
+            self.usage.assign_add(usage_update)
         
         # Decay usage and normalize
         self.usage.assign(self.usage * 0.99)
@@ -163,6 +239,14 @@ class ExternalMemory(MemoryComponent):
             state = pickle.load(f)
         self.btree = state['btree']
         self.usage = tf.Variable(state['usage'])
+    def get_shareable_data(self) -> Dict[str, Any]:
+        return {
+            'memory_embeddings': self.memory_embeddings.numpy()
+        }
+
+    def update_from_shared_data(self, shared_data: Dict[str, Any]) -> None:
+        if 'memory_embeddings' in shared_data:
+            self.memory_embeddings = tf.Variable(shared_data['memory_embeddings'])
 
 class FormulativeMemory(MemoryComponent):
     def __init__(self, max_formulas: int = 1000, embedding_size: int = 64):
@@ -187,7 +271,7 @@ class FormulativeMemory(MemoryComponent):
         for term in terms:
             if term not in self.inverted_index:
                 self.inverted_index[term] = []
-            self.inverted_index[term].append(formula_index)
+            self.inverted_index[term].append(formula_index.numpy())
         
         self._update_nn_index()
 
@@ -211,8 +295,9 @@ class FormulativeMemory(MemoryComponent):
         
         candidate_indices = set()
         for term in query_terms:
-            if term in self.inverted_index:
-                candidate_indices.update(map(int, self.inverted_index[term]))
+            term_str = term.numpy().decode('utf-8') if isinstance(term, tf.Tensor) else term
+            if term_str in self.inverted_index:
+                candidate_indices.update(self.inverted_index[term_str])
         
         if not candidate_indices:
             return tf.zeros([0, self.embedding_size], dtype=tf.float32), []
@@ -220,7 +305,7 @@ class FormulativeMemory(MemoryComponent):
         candidate_embeddings = tf.gather(self.formula_embeddings, list(candidate_indices))
         
         similarities = tf.matmul(tf.reshape(query_embedding, [1, -1]), candidate_embeddings, transpose_b=True)
-        top_k = min(top_k, tf.shape(candidate_embeddings)[0])
+        top_k = tf.minimum(top_k, tf.shape(candidate_embeddings)[0])
         _, top_indices = tf.nn.top_k(similarities[0], k=top_k)
         
         result_indices = [list(candidate_indices)[i] for i in top_indices.numpy()]
@@ -236,14 +321,29 @@ class FormulativeMemory(MemoryComponent):
             'formula_terms': self.formula_terms
         }
         with open(filepath, 'wb') as f:
+            import pickle
             pickle.dump(state, f)
 
     def load(self, filepath: str) -> None:
         with open(filepath, 'rb') as f:
+            import pickle
             state = pickle.load(f)
         self.formula_embeddings = tf.Variable(state['formula_embeddings'])
         self.inverted_index = state['inverted_index']
         self.formula_terms = state['formula_terms']
+        self._update_nn_index()
+
+    def get_shareable_data(self) -> Dict[str, Any]:
+        return {
+            'formula_embeddings': self.formula_embeddings.numpy(),
+            'inverted_index': self.inverted_index,
+            'formula_terms': self.formula_terms
+        }
+
+    def update_from_shared_data(self, shared_data: Dict[str, Any]) -> None:
+        self.formula_embeddings = tf.Variable(shared_data['formula_embeddings'])
+        self.inverted_index = shared_data['inverted_index']
+        self.formula_terms = shared_data['formula_terms']
         self._update_nn_index()
 
 class ConceptualMemory(MemoryComponent):
@@ -462,7 +562,9 @@ class IntegratedMemorySystem:
         results = {}
         
         if 'external_query' in input_data:
-            results['external_memory'] = self.external_memory.query(input_data['external_query'])
+            query_embedding = input_data['external_query']
+            query_terms = input_data.get('external_query_terms', None)
+            results['external_memory'] = self.external_memory.query(query_embedding, query_terms)
         
         if 'formulative_query' in input_data:
             results['formulative_memory'] = self.formulative_memory.query(input_data['formulative_query'])
@@ -480,7 +582,22 @@ class IntegratedMemorySystem:
             results['inference_memory'] = self.inference_memory.query(input_data['inference_query'])
         
         return results
+    def share_data(self) -> Dict[str, Dict[str, Any]]:
+        shared_data = {}
+        for component_name, component in self.__dict__.items():
+            if isinstance(component, MemoryComponent):
+                shared_data[component_name] = component.get_shareable_data()
+        return shared_data
 
+    def update_from_shared_data(self, shared_data: Dict[str, Dict[str, Any]]) -> None:
+        for component_name, component_data in shared_data.items():
+            if hasattr(self, component_name):
+                getattr(self, component_name).update_from_shared_data(component_data)
+
+    def process_input(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        # Share data between components before processing
+        shared_data = self.share_data()
+        self.update_from_shared_data(shared_data)
     def update_memories(self, update_data: Dict[str, Any]) -> None:
         if 'external_memory' in update_data:
             self.external_memory.add(**update_data['external_memory'])
@@ -515,3 +632,5 @@ class IntegratedMemorySystem:
         self.short_term_memory.load(f"{directory}/short_term_memory.pkl")
         self.long_term_memory.load(f"{directory}/long_term_memory.pkl")
         self.inference_memory.load(f"{directory}/inference_memory.pkl")
+    
+    
