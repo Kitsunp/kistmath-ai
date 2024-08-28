@@ -1,9 +1,11 @@
-from Kistmath_AI.utils.data_generation import generate_dataset
-from Kistmath_AI.utils.evaluation import evaluate_readiness
-from Kistmath_AI.training.parallel_training import parallel_train_model
-from Kistmath_AI.config.settings import READINESS_THRESHOLDS
-from Kistmath_AI.visualization.real_time_plotter import RealTimePlotter
-from Kistmath_AI.visualization.real_time_plotter import RealTimePlotter
+import numpy as np
+import tensorflow as tf
+from utils.data_generation import generate_dataset
+from utils.evaluation import evaluate_readiness
+from training.parallel_training import parallel_train_model
+from config.settings import READINESS_THRESHOLDS
+from visualization.real_time_plotter import RealTimePlotter
+from utils.tokenization import tokenize_problem
 
 def smooth_curriculum_learning(model, stages, initial_problems=4000, max_problems=5000, difficulty_increase_rate=0.05):
     all_history = []
@@ -11,6 +13,9 @@ def smooth_curriculum_learning(model, stages, initial_problems=4000, max_problem
 
     plotter = RealTimePlotter()
     plotter.after(100, plotter.update)  # Start the Tkinter loop
+
+    # Compile the model before starting the learning process
+    model.compile(optimizer='adam', loss='mse', metrics=['mae'])
 
     for stage in stages:
         print(f"\nEntering learning stage: {stage}")
@@ -23,7 +28,18 @@ def smooth_curriculum_learning(model, stages, initial_problems=4000, max_problem
             num_problems = min(initial_problems, max_problems - problems_solved)
             problems = generate_dataset(num_problems, stage, current_difficulty)
 
-            fold_histories = parallel_train_model(model, problems, epochs=50)
+            # Prepare data for training
+            X = np.array([tokenize_problem(problem.problem, stage) for problem in problems])
+            y = np.array([problem.solution for problem in problems])
+
+            # Ensure X and y have the same number of samples
+            assert len(X) == len(y), f"Number of samples in X ({len(X)}) and y ({len(y)}) do not match"
+
+            # Reshape y if necessary
+            if y.ndim == 1:
+                y = y.reshape(-1, 1)
+
+            fold_histories = parallel_train_model(model, X, y, epochs=50)
 
             # Update real-time plot with fold history loss data
             for history in fold_histories:
@@ -36,8 +52,15 @@ def smooth_curriculum_learning(model, stages, initial_problems=4000, max_problem
 
             stage_history.extend(fold_histories)
 
+            # Prepare validation data
             val_problems = problems[-len(problems)//5:]
-            if evaluate_readiness(model, val_problems, READINESS_THRESHOLDS[stage]):
+            X_val = np.array([tokenize_problem(problem.problem, stage) for problem in val_problems])
+            y_val = np.array([problem.solution for problem in val_problems])
+
+            if y_val.ndim == 1:
+                y_val = y_val.reshape(-1, 1)
+
+            if evaluate_readiness(model, X_val, y_val, READINESS_THRESHOLDS[stage]):
                 print("Model ready to advance!")
                 current_difficulty += difficulty_increase_rate
                 break

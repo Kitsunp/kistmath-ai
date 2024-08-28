@@ -2,8 +2,8 @@ import multiprocessing
 import numpy as np
 import tensorflow as tf
 from sklearn.model_selection import KFold
-from Kistmath_AI.utils.tokenization import tokenize_problem, tokenize_calculus_problem
-from Kistmath_AI.models.kistmat_ai import Kistmat_AI
+from utils.tokenization import tokenize_problem, tokenize_calculus_problem
+from models.kistmat_ai import Kistmat_AI
 
 def train_fold(fold_data):
     model_config, model_weights, train_problems, val_problems, epochs = fold_data
@@ -20,12 +20,25 @@ def train_fold(fold_data):
         y_train_imag = np.array([p.solution.imag for p in train_problems])
         y_train = np.column_stack((y_train_real, y_train_imag))
     
+    # Ensure input shape is correct
+    input_shape = model.input_shape[1:]
+    X_train = X_train.reshape((-1,) + input_shape)
+    
+    # Ensure y_train has the correct shape
+    if y_train.ndim == 1:
+        y_train = y_train.reshape(-1, 1)
+    
+    all_history = []
     # Ensure smooth transition between epochs
     for epoch in range(epochs):
         history = model.fit(X_train, y_train, epochs=1, batch_size=64, validation_split=0.2, verbose=0)
+        all_history.append(history.history)
         model.save_weights(f'temp_weights_epoch_{epoch}.h5')
     
-    return {'history': history.history, 'weights': model.get_weights()}
+    # Combine all epoch histories
+    combined_history = {k: np.concatenate([h[k] for h in all_history]) for k in all_history[0].keys()}
+    
+    return {'history': combined_history, 'weights': model.get_weights()}
 
 def parallel_train_model(model, problems, epochs=10, n_folds=3):
     kf = KFold(n_splits=n_folds)
@@ -33,7 +46,6 @@ def parallel_train_model(model, problems, epochs=10, n_folds=3):
     
     model_config = model.get_config()
     model_weights = model.get_weights()
-    model.compile(optimizer='adam', loss='mse', metrics=['mae'])
     for train_index, val_index in kf.split(problems):
         train_problems = [problems[i] for i in train_index]
         val_problems = [problems[i] for i in val_index]
@@ -52,6 +64,10 @@ def reinforce_single(args):
     else:
         inputs = tf.convert_to_tensor([tokenize_problem(problem.problem)])
         true_solution_tensor = tf.constant([[true_solution.real, true_solution.imag]], dtype=tf.float32)
+    
+    # Ensure input shape is correct
+    input_shape = model.input_shape[1:]
+    inputs = tf.reshape(inputs, (-1,) + input_shape)
     
     with tf.GradientTape() as tape:
         predicted = model(inputs, training=True)
