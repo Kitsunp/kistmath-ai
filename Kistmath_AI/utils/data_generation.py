@@ -89,5 +89,5 @@ def generate_dataset(num_problems, stage, difficulty):
                 solution += coeff * exp * (exp - 1)
             problem_str = problem_str.rstrip(" + ") + ")"
             
-            problems.append(MathProblem(problem_str, solution, difficulty, 'derivatives'))
+            problems.append(MathProblem(problem_str, complex(solution), difficulty, 'derivatives'))
     return problems
