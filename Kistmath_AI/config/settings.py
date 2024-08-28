@@ -1,7 +1,7 @@
 # Constants
 VOCAB_SIZE = 1000
-MAX_LENGTH = 10
-MAX_TERMS = 5
+MAX_LENGTH = 1024
+MAX_TERMS = 50
 
 # Stages for curriculum learning
 STAGES = ['elementary1', 'elementary2', 'elementary3', 'junior_high1', 'junior_high2', 
