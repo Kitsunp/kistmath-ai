@@ -1,31 +1,22 @@
 import tensorflow as tf
 import numpy as np
+from typing import List, Tuple, Any, Dict, Optional
+from abc import ABC, abstractmethod
 from sklearn.neighbors import NearestNeighbors
 from annoy import AnnoyIndex
-from typing import List, Tuple, Any, Dict, Optional
 import pickle
 import logging
-from abc import ABC, abstractmethod
 
-tf.data.experimental.enable_debug_mode()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class MemoryComponent(ABC):
-    @abstractmethod
+    @abstractmethod 
     def add(self, data: Any, metadata: Optional[Dict] = None) -> None:
         pass
 
     @abstractmethod
-    def query(self, query: Any, top_k: int = 5) -> List[Any]:
-        pass
-
-    @abstractmethod
-    def save(self, filepath: str) -> None:
-        pass
-
-    @abstractmethod
-    def load(self, filepath: str) -> None:
+    def query(self, query: Any, top_k: int = 5) -> Any:
         pass
 
     @abstractmethod
@@ -34,6 +25,14 @@ class MemoryComponent(ABC):
 
     @abstractmethod
     def update_from_shared_data(self, shared_data: Dict[str, Any]) -> None:
+        pass
+
+    @abstractmethod
+    def save(self, filepath: str) -> None:
+        pass
+
+    @abstractmethod
+    def load(self, filepath: str) -> None:
         pass
 
 class BTreeNode:
@@ -46,6 +45,7 @@ class BTree(MemoryComponent):
     def __init__(self, t: int):
         self.root = BTreeNode(True)
         self.t = t
+        logger.info("BTree initialized")
 
     def insert(self, k: Tuple[float, Any]) -> None:
         root = self.root
@@ -108,17 +108,6 @@ class BTree(MemoryComponent):
         result = self.search(query)
         return [result] if result is not None else []
 
-    def save(self, filepath: str) -> None:
-        import pickle
-        with open(filepath, 'wb') as f:
-            pickle.dump(self, f)
-
-    def load(self, filepath: str) -> None:
-        import pickle
-        with open(filepath, 'rb') as f:
-            loaded_tree = pickle.load(f)
-            self.__dict__.update(loaded_tree.__dict__)
-
     def get_shareable_data(self) -> Dict[str, Any]:
         return {
             'root': self._serialize_node(self.root),
@@ -129,6 +118,15 @@ class BTree(MemoryComponent):
         self.t = shared_data['t']
         self.root = self._deserialize_node(shared_data['root'])
 
+    def save(self, filepath: str) -> None:
+        with open(filepath, 'wb') as f:
+            pickle.dump(self, f)
+
+    def load(self, filepath: str) -> None:
+        with open(filepath, 'rb') as f:
+            loaded_tree = pickle.load(f)
+            self.__dict__.update(loaded_tree.__dict__)
+            logger.info("BTree loaded successfully")
     def _serialize_node(self, node: BTreeNode) -> Dict[str, Any]:
         return {
             'leaf': node.leaf,
@@ -141,7 +139,7 @@ class BTree(MemoryComponent):
         node.keys = data['keys']
         node.children = [self._deserialize_node(child) for child in data['children']] if not data['leaf'] else []
         return node
-    
+
 class ExternalMemory(MemoryComponent):
     def __init__(self, memory_size: int = 100, key_size: int = 64, value_size: int = 128):
         self.memory_size = memory_size
@@ -149,78 +147,51 @@ class ExternalMemory(MemoryComponent):
         self.value_size = value_size
         self.btree = BTree(t=5)
         self.usage = tf.Variable(tf.zeros([memory_size], dtype=tf.float32))
-        self.memory_embeddings = tf.Variable(tf.zeros([memory_size, value_size], dtype=tf.float32))  # Add this line
-
+        self.memory_embeddings = tf.Variable(tf.zeros([memory_size, value_size], dtype=tf.float32))
+        logger.info("ExternalMemory initialized")
     def add(self, data: Tuple[tf.Tensor, tf.Tensor], metadata: Optional[Dict] = None) -> None:
         key, value = data
         key = tf.ensure_shape(key, [None, self.key_size])
         value = tf.ensure_shape(value, [None, self.value_size])
-        
+
         for i in range(tf.shape(key)[0]):
             key_sum = tf.reduce_sum(key[i])
             self.btree.insert((key_sum.numpy(), value[i].numpy()))
-        
-        # Update memory_embeddings
+
         current_size = tf.shape(self.memory_embeddings)[0]
         new_size = tf.minimum(self.memory_size, current_size + tf.shape(value)[0])
         self.memory_embeddings = tf.Variable(tf.concat([self.memory_embeddings[:new_size - tf.shape(value)[0]], value[:new_size - current_size]], axis=0))
-        
+
         self._update_usage()
+
     def query(self, query_embedding: tf.Tensor, query_terms: Optional[tf.Tensor] = None, top_k: int = 5) -> Tuple[tf.Tensor, tf.Tensor]:
-        if tf.equal(tf.shape(self.memory_embeddings)[0], 0):  # Change this line
+        if tf.equal(tf.shape(self.memory_embeddings)[0], 0):
             return tf.zeros([0, self.value_size], dtype=tf.float32), tf.constant([], dtype=tf.int32)
-        
-        if query_terms is None:
-            # Si no se proporcionan query_terms, usar todos los índices disponibles
-            candidate_indices = tf.range(tf.shape(self.formula_embeddings)[0])
-        else:
-            query_terms = tf.strings.lower(tf.strings.strip(query_terms))
-            
-            def check_term(term):
-                return tf.reduce_any(tf.equal(tf.constant(list(self.inverted_index.keys())), term))
-            
-            mask = tf.map_fn(check_term, query_terms, dtype=tf.bool)
-            valid_terms = tf.boolean_mask(query_terms, mask)
-            
-            def get_indices(term):
-                return tf.constant(self.inverted_index[term.numpy().decode('utf-8')], dtype=tf.int32)
-            
-            candidate_indices = tf.map_fn(get_indices, valid_terms, dtype=tf.int32)
-            candidate_indices = tf.unique(tf.reshape(candidate_indices, [-1])).y
-        
-        if tf.equal(tf.size(candidate_indices), 0):
-            return tf.zeros([0, self.embedding_size], dtype=tf.float32), tf.constant([], dtype=tf.int32)
-        
-        candidate_embeddings = tf.gather(self.formula_embeddings, candidate_indices)
-        
-        similarities = tf.matmul(tf.reshape(query_embedding, [1, -1]), candidate_embeddings, transpose_b=True)
-        top_k = tf.minimum(top_k, tf.shape(candidate_embeddings)[0])
-        _, top_indices = tf.nn.top_k(similarities[0], k=top_k)
-        
-        result_indices = tf.gather(candidate_indices, top_indices)
-        return tf.gather(candidate_embeddings, top_indices), result_indices
-    def get_formula_terms(self, index: int) -> List[str]:
-        try:
-            return self.formula_terms[index]
-        except IndexError as e:
-            logger.error(f"Error en get_formula_terms: Índice {index} fuera de rango")
-            return []
-        except Exception as e:
-            logger.error(f"Error inesperado en get_formula_terms: {e}")
-            return []
-            
+
+        similarities = tf.matmul(tf.reshape(query_embedding, [1, -1]), self.memory_embeddings, transpose_b=True)
+        _, top_indices = tf.nn.top_k(similarities[0], k=min(top_k, tf.shape(self.memory_embeddings)[0]))
+
+        return tf.gather(self.memory_embeddings, top_indices), top_indices
+
+    def get_shareable_data(self) -> Dict[str, Any]:
+        return {
+            'memory_embeddings': self.memory_embeddings.numpy(),
+            'usage': self.usage.numpy()
+        }
+
+    def update_from_shared_data(self, shared_data: Dict[str, Any]) -> None:
+        if 'memory_embeddings' in shared_data:
+            self.memory_embeddings = tf.Variable(shared_data['memory_embeddings'])
+        if 'usage' in shared_data:
+            self.usage = tf.Variable(shared_data['usage'])
+
     def _update_usage(self, retrieved_values: Optional[tf.Tensor] = None) -> None:
         if retrieved_values is not None:
-            batch_size = tf.shape(retrieved_values)[0]
             usage_update = tf.reduce_sum(tf.cast(tf.not_equal(retrieved_values, 0), tf.float32), axis=-1)
-            
-            # Asegurarse de que usage_update tenga la misma forma que self.usage
             usage_update = tf.reduce_mean(usage_update)
             usage_update = tf.repeat(usage_update, self.memory_size)
-            
             self.usage.assign_add(usage_update)
-        
-        # Decay usage and normalize
+
         self.usage.assign(self.usage * 0.99)
         total_usage = tf.reduce_sum(self.usage)
         if total_usage > 0:
@@ -229,7 +200,8 @@ class ExternalMemory(MemoryComponent):
     def save(self, filepath: str) -> None:
         state = {
             'btree': self.btree,
-            'usage': self.usage.numpy()
+            'usage': self.usage.numpy(),
+            'memory_embeddings': self.memory_embeddings.numpy()
         }
         with open(filepath, 'wb') as f:
             pickle.dump(state, f)
@@ -239,15 +211,8 @@ class ExternalMemory(MemoryComponent):
             state = pickle.load(f)
         self.btree = state['btree']
         self.usage = tf.Variable(state['usage'])
-    def get_shareable_data(self) -> Dict[str, Any]:
-        return {
-            'memory_embeddings': self.memory_embeddings.numpy()
-        }
-
-    def update_from_shared_data(self, shared_data: Dict[str, Any]) -> None:
-        if 'memory_embeddings' in shared_data:
-            self.memory_embeddings = tf.Variable(shared_data['memory_embeddings'])
-
+        self.memory_embeddings = tf.Variable(state['memory_embeddings'])
+        logger.info("ExternalMemory loaded successfully")
 class FormulativeMemory(MemoryComponent):
     def __init__(self, max_formulas: int = 1000, embedding_size: int = 64):
         self.max_formulas = max_formulas
@@ -256,23 +221,59 @@ class FormulativeMemory(MemoryComponent):
         self.inverted_index = {}
         self.formula_terms = []
         self.nn_index = None
-
+        logger.info("FormulativeMemory initialized")
     def add(self, data: Tuple[tf.Tensor, List[str]], metadata: Optional[Dict] = None) -> None:
         formula, terms = data
         if tf.shape(self.formula_embeddings)[0] >= self.max_formulas:
             self._remove_oldest_formula()
-        
+
         formula = tf.reshape(formula, [-1, self.embedding_size])
         embedding = tf.reduce_mean(formula, axis=0, keepdims=True)
         self.formula_embeddings = tf.concat([self.formula_embeddings, embedding], axis=0)
-        
+
         formula_index = tf.shape(self.formula_embeddings)[0] - 1
         self.formula_terms.append(terms)
         for term in terms:
             if term not in self.inverted_index:
                 self.inverted_index[term] = []
             self.inverted_index[term].append(formula_index.numpy())
-        
+
+        self._update_nn_index()
+
+    def query(self, query: Tuple[tf.Tensor, List[str]], top_k: int = 5) -> Tuple[tf.Tensor, List[int]]:
+        query_embedding, query_terms = query
+        if tf.shape(self.formula_embeddings)[0] == 0:
+            return tf.zeros([0, self.embedding_size], dtype=tf.float32), []
+
+        candidate_indices = set()
+        for term in query_terms:
+            term_str = term.numpy().decode('utf-8') if isinstance(term, tf.Tensor) else term
+            if term_str in self.inverted_index:
+                candidate_indices.update(self.inverted_index[term_str])
+
+        if not candidate_indices:
+            return tf.zeros([0, self.embedding_size], dtype=tf.float32), []
+
+        candidate_embeddings = tf.gather(self.formula_embeddings, list(candidate_indices))
+
+        similarities = tf.matmul(tf.reshape(query_embedding, [1, -1]), candidate_embeddings, transpose_b=True)
+        top_k = tf.minimum(top_k, tf.shape(candidate_embeddings)[0])
+        _, top_indices = tf.nn.top_k(similarities[0], k=top_k)
+
+        result_indices = [list(candidate_indices)[i] for i in top_indices.numpy()]
+        return tf.gather(candidate_embeddings, top_indices), result_indices
+
+    def get_shareable_data(self) -> Dict[str, Any]:
+        return {
+            'formula_embeddings': self.formula_embeddings.numpy(),
+            'inverted_index': self.inverted_index,
+            'formula_terms': self.formula_terms
+        }
+
+    def update_from_shared_data(self, shared_data: Dict[str, Any]) -> None:
+        self.formula_embeddings = tf.Variable(shared_data['formula_embeddings'])
+        self.inverted_index = shared_data['inverted_index']
+        self.formula_terms = shared_data['formula_terms']
         self._update_nn_index()
 
     def _remove_oldest_formula(self) -> None:
@@ -288,32 +289,6 @@ class FormulativeMemory(MemoryComponent):
             n_neighbors = min(5, tf.shape(self.formula_embeddings)[0])
             self.nn_index = NearestNeighbors(n_neighbors=n_neighbors, algorithm='ball_tree').fit(self.formula_embeddings.numpy())
 
-    def query(self, query: Tuple[tf.Tensor, List[str]], top_k: int = 5) -> Tuple[tf.Tensor, List[int]]:
-        query_embedding, query_terms = query
-        if tf.shape(self.formula_embeddings)[0] == 0:
-            return tf.zeros([0, self.embedding_size], dtype=tf.float32), []
-        
-        candidate_indices = set()
-        for term in query_terms:
-            term_str = term.numpy().decode('utf-8') if isinstance(term, tf.Tensor) else term
-            if term_str in self.inverted_index:
-                candidate_indices.update(self.inverted_index[term_str])
-        
-        if not candidate_indices:
-            return tf.zeros([0, self.embedding_size], dtype=tf.float32), []
-        
-        candidate_embeddings = tf.gather(self.formula_embeddings, list(candidate_indices))
-        
-        similarities = tf.matmul(tf.reshape(query_embedding, [1, -1]), candidate_embeddings, transpose_b=True)
-        top_k = tf.minimum(top_k, tf.shape(candidate_embeddings)[0])
-        _, top_indices = tf.nn.top_k(similarities[0], k=top_k)
-        
-        result_indices = [list(candidate_indices)[i] for i in top_indices.numpy()]
-        return tf.gather(candidate_embeddings, top_indices), result_indices
-
-    def get_formula_terms(self, index: int) -> List[str]:
-        return self.formula_terms[index]
-
     def save(self, filepath: str) -> None:
         state = {
             'formula_embeddings': self.formula_embeddings.numpy(),
@@ -321,67 +296,59 @@ class FormulativeMemory(MemoryComponent):
             'formula_terms': self.formula_terms
         }
         with open(filepath, 'wb') as f:
-            import pickle
             pickle.dump(state, f)
 
     def load(self, filepath: str) -> None:
         with open(filepath, 'rb') as f:
-            import pickle
             state = pickle.load(f)
         self.formula_embeddings = tf.Variable(state['formula_embeddings'])
         self.inverted_index = state['inverted_index']
         self.formula_terms = state['formula_terms']
         self._update_nn_index()
-
-    def get_shareable_data(self) -> Dict[str, Any]:
-        return {
-            'formula_embeddings': self.formula_embeddings.numpy(),
-            'inverted_index': self.inverted_index,
-            'formula_terms': self.formula_terms
-        }
-
-    def update_from_shared_data(self, shared_data: Dict[str, Any]) -> None:
-        self.formula_embeddings = tf.Variable(shared_data['formula_embeddings'])
-        self.inverted_index = shared_data['inverted_index']
-        self.formula_terms = shared_data['formula_terms']
-        self._update_nn_index()
-
+        logger.info("FormulativeMemory loaded successfully")
 class ConceptualMemory(MemoryComponent):
     def __init__(self, embedding_size: int = 64):
         self.embedding_size = embedding_size
         self.concepts = {}
         self.concept_embeddings = tf.Variable(tf.zeros([0, embedding_size], dtype=tf.float32))
         self.nn_index = None
-
+        logger.info("ConceptualMemory initialized")
     def add(self, data: Tuple[tf.Tensor, tf.Tensor], metadata: Optional[Dict] = None) -> None:
         key, concept = data
         key = tf.reshape(key, [-1, self.embedding_size])
         key_embedding = tf.reduce_mean(key, axis=0, keepdims=True)
         self.concept_embeddings = tf.concat([self.concept_embeddings, key_embedding], axis=0)
         self.concepts[tf.reduce_sum(key_embedding).numpy()] = concept
-        
+
         self._update_nn_index()
+
+    def query(self, query: tf.Tensor, top_k: int = 5) -> tf.Tensor:
+        query_embedding = tf.reduce_mean(query, axis=0)
+        query_embedding = tf.reshape(query_embedding, [1, self.embedding_size])
+
+        if self.nn_index is None:
+            return tf.zeros([0, self.embedding_size], dtype=tf.float32)
+
+        distances, indices = self.nn_index.kneighbors(query_embedding.numpy(), 
+                                                      n_neighbors=min(top_k, tf.shape(self.concept_embeddings)[0]))
+
+        return tf.gather(self.concept_embeddings, indices[0])
 
     def _update_nn_index(self) -> None:
         if tf.shape(self.concept_embeddings)[0] > 0:
             n_neighbors = min(5, tf.shape(self.concept_embeddings)[0])
             self.nn_index = NearestNeighbors(n_neighbors=n_neighbors, algorithm='ball_tree').fit(self.concept_embeddings.numpy())
 
-    def query(self, query: tf.Tensor, top_k: int = 5) -> tf.Tensor:
-        query_embedding = tf.reduce_mean(query, axis=0)
-        query_embedding = tf.reshape(query_embedding, [1, self.embedding_size])
-        
-        if self.nn_index is None:
-            return tf.zeros([0, self.embedding_size], dtype=tf.float32)
-        
-        distances, indices = self.nn_index.kneighbors(query_embedding.numpy(), 
-                                                      n_neighbors=min(top_k, tf.shape(self.concept_embeddings)[0]))
-        
-        return tf.gather(self.concept_embeddings, indices[0])
+    def get_shareable_data(self) -> Dict[str, Any]:
+        return {
+            'concepts': self.concepts,
+            'concept_embeddings': self.concept_embeddings.numpy()
+        }
 
-    def get_concept(self, key_embedding: tf.Tensor) -> tf.Tensor:
-        key_sum = tf.reduce_sum(key_embedding).numpy()
-        return self.concepts.get(key_sum, None)
+    def update_from_shared_data(self, shared_data: Dict[str, Any]) -> None:
+        self.concepts = shared_data['concepts']
+        self.concept_embeddings = tf.Variable(shared_data['concept_embeddings'])
+        self._update_nn_index()
 
     def save(self, filepath: str) -> None:
         state = {
@@ -397,12 +364,13 @@ class ConceptualMemory(MemoryComponent):
         self.concepts = state['concepts']
         self.concept_embeddings = tf.Variable(state['concept_embeddings'])
         self._update_nn_index()
+        logger.info("ConceptualMemory loaded successfully")
 
 class ShortTermMemory(MemoryComponent):
     def __init__(self, capacity: int = 100):
         self.capacity = capacity
         self.memory = []
-
+        logger.info("ShortTermMemory initialized")
     def add(self, data: tf.Tensor, metadata: Optional[Dict] = None) -> None:
         if len(self.memory) >= self.capacity:
             self.memory.pop(0)
@@ -413,6 +381,12 @@ class ShortTermMemory(MemoryComponent):
         _, top_indices = tf.nn.top_k(similarities, k=min(top_k, len(self.memory)))
         return tf.stack([tf.reshape(self.memory[i], [-1]) for i in top_indices.numpy()])
 
+    def get_shareable_data(self) -> Dict[str, Any]:
+        return {'memory': self.memory}
+
+    def update_from_shared_data(self, shared_data: Dict[str, Any]) -> None:
+        self.memory = shared_data['memory'][-self.capacity:]
+
     def save(self, filepath: str) -> None:
         with open(filepath, 'wb') as f:
             pickle.dump(self.memory, f)
@@ -420,7 +394,8 @@ class ShortTermMemory(MemoryComponent):
     def load(self, filepath: str) -> None:
         with open(filepath, 'rb') as f:
             self.memory = pickle.load(f)
-        self.memory = self.memory[-self.capacity:]  # Ensure we don't exceed capacity
+        self.memory = self.memory[-self.capacity:]
+        logger.info("ShortTermMemory loaded successfully")
 
 class LongTermMemory(MemoryComponent):
     def __init__(self, capacity: int = 10000):
@@ -428,6 +403,7 @@ class LongTermMemory(MemoryComponent):
         self.memory = []
         self.importance_scores = []
         self.time_added = []
+        logger.info("LongTermMemory initialized")
 
     def add(self, data: tf.Tensor, metadata: Optional[Dict] = None) -> None:
         importance = metadata.get('importance', 1.0) if metadata else 1.0
@@ -436,6 +412,24 @@ class LongTermMemory(MemoryComponent):
         self.memory.append(data)
         self.importance_scores.append(importance)
         self.time_added.append(tf.timestamp())
+        self._sort_by_importance()
+
+    def query(self, query: tf.Tensor, top_k: int = 5) -> tf.Tensor:
+        similarities = tf.stack([tf.reduce_sum(query * tf.reshape(mem, [1, -1])) * imp for mem, imp in zip(self.memory, self.importance_scores)])
+        _, top_indices = tf.nn.top_k(similarities, k=min(top_k, len(self.memory)))
+        return tf.stack([tf.reshape(self.memory[i], [-1]) for i in top_indices.numpy()])
+
+    def get_shareable_data(self) -> Dict[str, Any]:
+        return {
+            'memory': self.memory,
+            'importance_scores': self.importance_scores,
+            'time_added': self.time_added
+        }
+
+    def update_from_shared_data(self, shared_data: Dict[str, Any]) -> None:
+        self.memory = shared_data['memory']
+        self.importance_scores = shared_data['importance_scores']
+        self.time_added = shared_data['time_added']
         self._sort_by_importance()
 
     def _remove_least_important(self) -> None:
@@ -449,16 +443,6 @@ class LongTermMemory(MemoryComponent):
         self.memory = [self.memory[i] for i in sorted_indices]
         self.importance_scores = [self.importance_scores[i] for i in sorted_indices]
         self.time_added = [self.time_added[i] for i in sorted_indices]
-
-    def query(self, query: tf.Tensor, top_k: int = 5) -> tf.Tensor:
-        similarities = tf.stack([tf.reduce_sum(query * tf.reshape(mem, [1, -1])) * imp for mem, imp in zip(self.memory, self.importance_scores)])
-        _, top_indices = tf.nn.top_k(similarities, k=min(top_k, len(self.memory)))
-        return tf.stack([tf.reshape(self.memory[i], [-1]) for i in top_indices.numpy()])
-
-    def update_importance(self, index: int, new_importance: float) -> None:
-        if 0 <= index < len(self.importance_scores):
-            self.importance_scores[index] = new_importance
-            self._sort_by_importance()
 
     def save(self, filepath: str) -> None:
         state = {
@@ -476,6 +460,7 @@ class LongTermMemory(MemoryComponent):
         self.importance_scores = state['importance_scores']
         self.time_added = state['time_added']
         self._sort_by_importance()
+        logger.info("LongTermMemory loaded successfully")
 
 class InferenceMemory(MemoryComponent):
     def __init__(self, capacity: int = 500, embedding_size: int = 64):
@@ -485,6 +470,7 @@ class InferenceMemory(MemoryComponent):
         self.confidence_scores = []
         self.index = AnnoyIndex(embedding_size, 'angular')
         self.current_index = 0
+        logger.info("InferenceMemory initialized")
 
     def add(self, data: Tuple[tf.Tensor, float], metadata: Optional[Dict] = None) -> None:
         inference, confidence = data
@@ -494,9 +480,38 @@ class InferenceMemory(MemoryComponent):
         self.confidence_scores.append(confidence)
         self.index.add_item(self.current_index, inference.numpy())
         self.current_index += 1
-        
+
         if self.current_index % 100 == 0:
             self._rebuild_index()
+
+    def query(self, query: tf.Tensor, top_k: int = 5) -> tf.Tensor:
+        if len(self.inferences) == 0:
+            return tf.zeros([0, self.embedding_size], dtype=tf.float32)
+
+        query_vector = tf.reshape(query, [-1]).numpy()
+        nearest_indices = self.index.get_nns_by_vector(query_vector, top_k, include_distances=True)
+
+        top_indices, distances = nearest_indices
+        confidences = [self.confidence_scores[i] for i in top_indices]
+
+        combined_scores = [1 / (d + 1e-5) * c for d, c in zip(distances, confidences)]
+        sorted_indices = np.argsort(combined_scores)[::-1]
+        result_indices = [top_indices[i] for i in sorted_indices]
+
+        return tf.stack([tf.reshape(self.inferences[i], [-1]) for i in result_indices])
+
+    def get_shareable_data(self) -> Dict[str, Any]:
+        return {
+            'inferences': self.inferences,
+            'confidence_scores': self.confidence_scores,
+            'current_index': self.current_index
+        }
+
+    def update_from_shared_data(self, shared_data: Dict[str, Any]) -> None:
+        self.inferences = shared_data['inferences']
+        self.confidence_scores = shared_data['confidence_scores']
+        self.current_index = shared_data['current_index']
+        self._rebuild_index()
 
     def _remove_least_confident(self) -> None:
         min_confidence_index = np.argmin(self.confidence_scores)
@@ -510,26 +525,6 @@ class InferenceMemory(MemoryComponent):
         for i, inference in enumerate(self.inferences):
             self.index.add_item(i, inference.numpy())
         self.index.build(10)  # 10 trees - adjust based on your needs
-
-    def query(self, query: tf.Tensor, top_k: int = 5) -> tf.Tensor:
-        if len(self.inferences) == 0:
-            return tf.zeros([0, self.embedding_size], dtype=tf.float32)
-        
-        query_vector = tf.reshape(query, [-1]).numpy()
-        nearest_indices = self.index.get_nns_by_vector(query_vector, top_k, include_distances=True)
-        
-        top_indices, distances = nearest_indices
-        confidences = [self.confidence_scores[i] for i in top_indices]
-        
-        combined_scores = [1 / (d + 1e-5) * c for d, c in zip(distances, confidences)]
-        sorted_indices = np.argsort(combined_scores)[::-1]
-        result_indices = [top_indices[i] for i in sorted_indices]
-        
-        return tf.stack([tf.reshape(self.inferences[i], [-1]) for i in result_indices])
-
-    def update_confidence(self, index: int, new_confidence: float) -> None:
-        if 0 <= index < len(self.confidence_scores):
-            self.confidence_scores[index] = new_confidence
 
     def save(self, filepath: str) -> None:
         state = {
@@ -548,6 +543,7 @@ class InferenceMemory(MemoryComponent):
         self.confidence_scores = state['confidence_scores']
         self.current_index = state['current_index']
         self.index.load(filepath + '.ann')
+        logger.info("InferenceMemory loaded successfully")
 
 class IntegratedMemorySystem:
     def __init__(self, config: Dict[str, Any]):
@@ -557,31 +553,39 @@ class IntegratedMemorySystem:
         self.short_term_memory = ShortTermMemory(**config.get('short_term_memory', {}))
         self.long_term_memory = LongTermMemory(**config.get('long_term_memory', {}))
         self.inference_memory = InferenceMemory(**config.get('inference_memory', {}))
+        logger.info("IntegratedMemorySystem initialized successfully")
 
     def process_input(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
+        # Share data between components before processing
+        shared_data = self.share_data()
+        self.update_from_shared_data(shared_data)
+
         results = {}
-        
+
         if 'external_query' in input_data:
-            query_embedding = input_data['external_query']
-            query_terms = input_data.get('external_query_terms', None)
+            query_embedding, query_terms = input_data['external_query']
             results['external_memory'] = self.external_memory.query(query_embedding, query_terms)
-        
+
         if 'formulative_query' in input_data:
             results['formulative_memory'] = self.formulative_memory.query(input_data['formulative_query'])
-        
+
         if 'conceptual_query' in input_data:
             results['conceptual_memory'] = self.conceptual_memory.query(input_data['conceptual_query'])
-        
+
         if 'short_term_query' in input_data:
             results['short_term_memory'] = self.short_term_memory.query(input_data['short_term_query'])
-        
+
         if 'long_term_query' in input_data:
             results['long_term_memory'] = self.long_term_memory.query(input_data['long_term_query'])
-        
+
         if 'inference_query' in input_data:
             results['inference_memory'] = self.inference_memory.query(input_data['inference_query'])
-        
-        return results
+
+        # Combine and process results
+        combined_results = self.combine_results(results)
+
+        return combined_results
+
     def share_data(self) -> Dict[str, Dict[str, Any]]:
         shared_data = {}
         for component_name, component in self.__dict__.items():
@@ -594,43 +598,83 @@ class IntegratedMemorySystem:
             if hasattr(self, component_name):
                 getattr(self, component_name).update_from_shared_data(component_data)
 
-    def process_input(self, input_data: Dict[str, Any]) -> Dict[str, Any]:
-        # Share data between components before processing
+    def combine_results(self, results: Dict[str, Any]) -> Dict[str, Any]:
+        combined_results = {}
+        
+        # Combine embeddings from different memory components
+        all_embeddings = []
+        for memory_type, result in results.items():
+            if isinstance(result, tuple) and len(result) == 2:
+                embeddings, _ = result
+                all_embeddings.append(embeddings)
+            elif isinstance(result, tf.Tensor):
+                all_embeddings.append(result)
+        
+        if all_embeddings:
+            combined_embeddings = tf.concat(all_embeddings, axis=0)
+            combined_results['combined_embeddings'] = combined_embeddings
+
+        # Combine other relevant information
+        combined_results['memory_outputs'] = results
+
+        return combined_results
+
+    def update_memories(self, update_data: Dict[str, Any]) -> None:
+        for memory_type, data in update_data.items():
+            if hasattr(self, memory_type):
+                getattr(self, memory_type).add(**data)
+
+        # After updating individual memories, share the updated data
         shared_data = self.share_data()
         self.update_from_shared_data(shared_data)
-    def update_memories(self, update_data: Dict[str, Any]) -> None:
-        if 'external_memory' in update_data:
-            self.external_memory.add(**update_data['external_memory'])
-        
-        if 'formulative_memory' in update_data:
-            self.formulative_memory.add(**update_data['formulative_memory'])
-        
-        if 'conceptual_memory' in update_data:
-            self.conceptual_memory.add(**update_data['conceptual_memory'])
-        
-        if 'short_term_memory' in update_data:
-            self.short_term_memory.add(**update_data['short_term_memory'])
-        
-        if 'long_term_memory' in update_data:
-            self.long_term_memory.add(**update_data['long_term_memory'])
-        
-        if 'inference_memory' in update_data:
-            self.inference_memory.add(**update_data['inference_memory'])
 
     def save_state(self, directory: str) -> None:
-        self.external_memory.save(f"{directory}/external_memory.pkl")
-        self.formulative_memory.save(f"{directory}/formulative_memory.pkl")
-        self.conceptual_memory.save(f"{directory}/conceptual_memory.pkl")
-        self.short_term_memory.save(f"{directory}/short_term_memory.pkl")
-        self.long_term_memory.save(f"{directory}/long_term_memory.pkl")
-        self.inference_memory.save(f"{directory}/inference_memory.pkl")
+        for component_name, component in self.__dict__.items():
+            if isinstance(component, MemoryComponent):
+                component.save(f"{directory}/{component_name}.pkl")
 
     def load_state(self, directory: str) -> None:
-        self.external_memory.load(f"{directory}/external_memory.pkl")
-        self.formulative_memory.load(f"{directory}/formulative_memory.pkl")
-        self.conceptual_memory.load(f"{directory}/conceptual_memory.pkl")
-        self.short_term_memory.load(f"{directory}/short_term_memory.pkl")
-        self.long_term_memory.load(f"{directory}/long_term_memory.pkl")
-        self.inference_memory.load(f"{directory}/inference_memory.pkl")
-    
-    
+        for component_name, component in self.__dict__.items():
+            if isinstance(component, MemoryComponent):
+                component.load(f"{directory}/{component_name}.pkl")
+        logger.info("IntegratedMemorySystem state loaded successfully")
+
+    def get_memory_statistics(self) -> Dict[str, Any]:
+        stats = {}
+        for component_name, component in self.__dict__.items():
+            if isinstance(component, MemoryComponent):
+                if isinstance(component, ExternalMemory):
+                    stats[component_name] = {
+                        'size': tf.shape(component.memory_embeddings)[0].numpy(),
+                        'capacity': component.memory_size,
+                        'usage': tf.reduce_mean(component.usage).numpy()
+                    }
+                elif isinstance(component, FormulativeMemory):
+                    stats[component_name] = {
+                        'size': tf.shape(component.formula_embeddings)[0].numpy(),
+                        'capacity': component.max_formulas,
+                        'unique_terms': len(component.inverted_index)
+                    }
+                elif isinstance(component, ConceptualMemory):
+                    stats[component_name] = {
+                        'size': tf.shape(component.concept_embeddings)[0].numpy(),
+                        'unique_concepts': len(component.concepts)
+                    }
+                elif isinstance(component, ShortTermMemory):
+                    stats[component_name] = {
+                        'size': len(component.memory),
+                        'capacity': component.capacity
+                    }
+                elif isinstance(component, LongTermMemory):
+                    stats[component_name] = {
+                        'size': len(component.memory),
+                        'capacity': component.capacity,
+                        'avg_importance': np.mean(component.importance_scores) if component.importance_scores else 0
+                    }
+                elif isinstance(component, InferenceMemory):
+                    stats[component_name] = {
+                        'size': len(component.inferences),
+                        'capacity': component.capacity,
+                        'avg_confidence': np.mean(component.confidence_scores) if component.confidence_scores else 0
+                    }
+        return stats
