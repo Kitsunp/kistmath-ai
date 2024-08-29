@@ -63,22 +63,33 @@ def reinforce_single(args):
         true_solution_tensor = tf.constant([[true_solution]], dtype=tf.float32)
     else:
         inputs = tf.convert_to_tensor([tokenize_problem(problem.problem)])
-        true_solution_tensor = tf.constant([[true_solution.real, true_solution.imag]], dtype=tf.float32)
-    
+        if hasattr(true_solution, 'real') and hasattr(true_solution, 'imag'):
+            true_solution_tensor = tf.constant([[true_solution.real, true_solution.imag]], dtype=tf.float32)
+        else:
+            true_solution_tensor = tf.constant([[true_solution]], dtype=tf.float32)
+
     # Ensure input shape is correct
     input_shape = model.input_shape[1:]
     inputs = tf.reshape(inputs, (-1,) + input_shape)
-    
+
     with tf.GradientTape() as tape:
         predicted = model(inputs, training=True)
         loss = tf.reduce_mean(tf.square(true_solution_tensor - predicted))
-    
+
     gradients = tape.gradient(loss, model.trainable_variables)
     optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
     optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-    
+
     return loss.numpy()
 
+def parallel_reinforce_learning(model, problems, predictions, true_solutions, learning_rate=0.01):
+    reinforce_data = [(model, problem, prediction, true_solution) 
+                      for problem, prediction, true_solution in zip(problems, predictions, true_solutions)]
+
+    with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+        losses = pool.map(reinforce_single, reinforce_data)
+
+    return losses
 def parallel_reinforce_learning(model, problems, predictions, true_solutions, learning_rate=0.01):
     reinforce_data = [(model, problem, prediction, true_solution) 
                       for problem, prediction, true_solution in zip(problems, predictions, true_solutions)]

@@ -39,7 +39,7 @@ def smooth_curriculum_learning(model, stages, initial_problems=4000, max_problem
             if y.ndim == 1:
                 y = y.reshape(-1, 1)
 
-            fold_histories = parallel_train_model(model, X, y, epochs=50)
+            fold_histories = parallel_train_model(model, problems, epochs=50)
 
             # Update real-time plot with fold history loss data
             for history in fold_histories:
