@@ -15,7 +15,7 @@ Kistmat-AI is an advanced machine learning model designed to solve a wide range 
 - Symbolic Reasoning: Incorporates a symbolic reasoning component to handle abstract mathematical concepts.
 - Parallel Processing: Utilizes parallel processing for efficient training and reinforcement learning.
 - Real-time Visualization: Provides real-time plotting of learning curves and performance metrics.
-
+a
 ## Technical Details
 
 - Framework: TensorFlow and Keras
