@@ -22,3 +22,22 @@ This file contains the implementation of the `RealTimePlotter` class, which is u
 
 - `tkinter`
 - `matplotlib`
+
+## Example Usage
+
+```python
+from Kistmath_AI.visualization.real_time_plotter import RealTimePlotter
+
+# Initialize the plotter
+plotter = RealTimePlotter()
+
+# Simulate real-time data update
+import random
+import time
+
+for _ in range(200):
+    new_data = random.random()
+    plotter.update_plot(new_data)
+    plotter.update()
+    time.sleep(0.1)
+```

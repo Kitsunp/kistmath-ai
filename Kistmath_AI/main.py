@@ -49,6 +49,7 @@ def main():
         finally:
             plot_queue.put(None)
             plot_process.join()
+            plotter.update_documentation()
 
         if all_history:
             plot_learning_curves(all_history)
