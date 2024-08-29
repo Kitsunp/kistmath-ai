@@ -3,7 +3,10 @@ import tensorflow as tf
 from config.settings import VOCAB_SIZE, MAX_LENGTH, MAX_TERMS
 
 def tokenize_problem(problem, stage, vocab_size=VOCAB_SIZE, max_length=MAX_LENGTH):
-    stage = stage.numpy().decode('utf-8') if isinstance(stage, tf.Tensor) else stage
+    if isinstance(stage, tf.Tensor):
+        stage = stage.numpy().decode('utf-8')
+    elif isinstance(stage, bytes):
+        stage = stage.decode('utf-8')
     if stage == 'university':
         return tokenize_calculus_problem(problem, max_length)
     elif stage.startswith('high_school'):
