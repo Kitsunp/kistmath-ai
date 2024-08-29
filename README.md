@@ -5,7 +5,7 @@ Kistmat-AI: A Machine Learning Model for Mathematical Problem Solving
 ## Project Description
 
 Kistmat-AI is an advanced machine learning model designed to solve a wide range of mathematical problems, from elementary arithmetic to university-level calculus. This project demonstrates the application of curriculum learning in AI, allowing the model to progressively tackle more complex mathematical concepts.
-a
+
 ## Key Features
 
 - Curriculum Learning: The model starts with basic arithmetic and gradually progresses to advanced calculus, mimicking human learning patterns.
