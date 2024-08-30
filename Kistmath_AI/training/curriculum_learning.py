@@ -32,12 +32,16 @@ def smooth_curriculum_learning(model, stages, initial_problems=4000, max_problem
             X = np.array([tokenize_problem(problem.problem, stage) for problem in problems])
             y = np.array([problem.solution for problem in problems])
 
-            # Ensure X and y have the same number of samples
-            assert len(X) == len(y), f"Number of samples in X ({len(X)}) and y ({len(y)}) do not match"
+            # Ensure X has the correct shape (batch_size, time_steps)
+            if len(X.shape) == 1:
+                X = np.expand_dims(X, axis=0)
 
             # Reshape y if necessary
             if y.ndim == 1:
                 y = y.reshape(-1, 1)
+
+            # Ensure X and y have the same number of samples
+            assert X.shape[0] == y.shape[0], f"Number of samples in X ({X.shape[0]}) and y ({y.shape[0]}) do not match"
 
             fold_histories = parallel_train_model(model, problems, epochs=50)
 
