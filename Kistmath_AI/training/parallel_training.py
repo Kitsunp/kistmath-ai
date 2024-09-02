@@ -117,7 +117,7 @@ def reinforce_single(args):
     try:
         model, problem, prediction, true_solution = args
         inputs = tf.convert_to_tensor([tokenize_problem(problem.problem, model.get_learning_stage())])
-        inputs = tf.reshape(inputs, (-1, model.input_shape[0]))  # Asegúrate de que esto coincida con la forma esperada por el modelo
+        inputs = tf.reshape(inputs, (-1, model.input_shape[1]))  # Ajustar a la forma esperada por el modelo
 
         if model.get_learning_stage() == 'university':
             true_solution_tensor = tf.constant([[np.abs(true_solution)]], dtype=tf.float32)
@@ -127,26 +127,22 @@ def reinforce_single(args):
             else:
                 true_solution_tensor = tf.constant([[true_solution]], dtype=tf.float32)
 
-        print(f"Forma de inputs antes de forward pass: {inputs.shape}")
-
         with tf.GradientTape() as tape:
             predicted = model(inputs, training=True)
-            predicted = tf.reshape(predicted, true_solution_tensor.shape)  # Asegurar forma correcta
-            print(f"Forma de predicted: {predicted.shape}")
-            print(f"Forma de true_solution_tensor: {true_solution_tensor.shape}")
+            predicted = tf.reshape(predicted, true_solution_tensor.shape)
             loss = tf.reduce_mean(tf.square(tf.cast(true_solution_tensor, tf.float32) - tf.cast(predicted, tf.float32)))
 
         gradients = tape.gradient(loss, model.trainable_variables)
 
         if not any(grad is not None for grad in gradients):
-            raise ValueError("No gradients were computed during the forward pass")
+            raise ValueError("No se calcularon gradientes durante el pase hacia adelante")
 
         optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
         optimizer.apply_gradients(zip(gradients, model.trainable_variables))
 
         return loss.numpy()
     except Exception as e:
-        print(f"Error en reinforce_single: {str(e)}")
+        print(f"Error en reinforce_single: {e}")
         raise
 
 def parallel_reinforce_learning(model, problems, predictions, true_solutions, learning_rate=0.01):
