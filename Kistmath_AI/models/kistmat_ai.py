@@ -312,23 +312,31 @@ class Kistmat_AI(keras.Model):
     @tf.function
     def _query_memories(self, x):
         try:
-            print(f"Forma de x antes de memory_query: {x.shape}")
+            logger.info(f"Iniciando _query_memories. Forma de x: {x.shape}")
+            
+            # Generar la consulta de memoria
             query = self.memory_query(x)
-            print(f"Forma de query después de memory_query: {query.shape}")
-            print(f"Forma de self.memory_system.external_memory.memory_embeddings: {self.memory_system.external_memory.memory_embeddings.shape}")
-
-            # Ajustar las dimensiones para que sean compatibles
+            logger.info(f"Forma de query después de memory_query: {query.shape}")
+            
+            # Asegurar que la consulta tenga la forma correcta
             query = tf.reshape(query, [-1, self.memory_system.external_memory.key_size])
+            logger.info(f"Forma de query después de reshape: {query.shape}")
+            
+            # Preparar los embeddings de memoria para la multiplicación matricial
             memory_embeddings = tf.transpose(self.memory_system.external_memory.memory_embeddings)
+            logger.info(f"Forma de memory_embeddings: {memory_embeddings.shape}")
 
+            # Calcular similitudes
             similarities = tf.matmul(query, memory_embeddings)
+            logger.info(f"Forma de similarities: {similarities.shape}")
 
             # Obtener los top_k resultados más similares
             top_k = tf.minimum(5, tf.shape(similarities)[1])
-            _, top_indices = tf.nn.top_k(similarities, k=top_k)
+            _, top_indices = tf.nn.top_k(similarities[0], k=top_k)
 
             # Obtener los embeddings de memoria correspondientes
             retrieved_memories = tf.gather(self.memory_system.external_memory.memory_embeddings, top_indices)
+            logger.info(f"Forma de retrieved_memories: {retrieved_memories.shape}")
 
             # Procesar los resultados de diferentes tipos de memoria
             memory_results = self.memory_system.process_input({
@@ -351,20 +359,27 @@ class Kistmat_AI(keras.Model):
                     if tf.rank(result) == 2:
                         result = tf.expand_dims(result, axis=1)
                     memory_outputs.append(result)
+                    logger.info(f"Forma de resultado de {memory_type}: {result.shape}")
 
             # Combinar todos los resultados de memoria
             combined_memory = tf.concat(memory_outputs, axis=1)
+            logger.info(f"Forma de combined_memory: {combined_memory.shape}")
 
             # Aplicar atención sobre la memoria combinada
             x_expanded = tf.expand_dims(x, axis=1)
             attended_memory = self.memory_attention(x_expanded, combined_memory, combined_memory)
             attended_memory = tf.squeeze(attended_memory, axis=1)
+            logger.info(f"Forma de attended_memory: {attended_memory.shape}")
 
             # Procesar la memoria atendida
             processed_memory = self.memory_dense(attended_memory)
+            logger.info(f"Forma de processed_memory: {processed_memory.shape}")
 
             # Combinar la entrada original con la memoria procesada
-            return tf.concat([x, processed_memory], axis=-1)
+            result = tf.concat([x, processed_memory], axis=-1)
+            logger.info(f"Forma final del resultado: {result.shape}")
+
+            return result
 
         except tf.errors.InvalidArgumentError as e:
             logger.error(f"Error de argumento inválido en _query_memories: {e}")
@@ -372,10 +387,10 @@ class Kistmat_AI(keras.Model):
             logger.error(f"x: {x.shape}")
             logger.error(f"query: {query.shape}")
             logger.error(f"memory_embeddings: {self.memory_system.external_memory.memory_embeddings.shape}")
-            raise
+            return x  # Devolver la entrada original en caso de error
         except Exception as e:
             logger.error(f"Error inesperado en _query_memories: {e}")
-            raise
+            return x  # Devolver la entrada original en caso de error
 
 
     def _generate_output(self, x, current_stage, training):
@@ -421,26 +436,31 @@ class Kistmat_AI(keras.Model):
 
     @tf.function
     def _extract_relevant_terms(self, query):
-        current_stage = self.get_learning_stage()
+        try:
+            current_stage = self.get_learning_stage()
+            
+            def extract_terms(term_indices):
+                return tf.reduce_sum(tf.gather(query, term_indices, axis=-1), axis=-1)
+
+            elementary_indices = tf.constant([0, 1, 2, 3, 4, 5])
+            junior_high_indices = tf.constant([6, 7, 8, 9, 10, 11])
+            high_school_indices = tf.constant([12, 13, 14, 15, 16, 17])
+            university_indices = tf.constant([18, 19, 20, 21, 22, 23])
+
+            return tf.case([
+                (tf.equal(current_stage, tf.constant('elementary1')), lambda: extract_terms(elementary_indices)),
+                (tf.equal(current_stage, tf.constant('elementary2')), lambda: extract_terms(elementary_indices)),
+                (tf.equal(current_stage, tf.constant('elementary3')), lambda: extract_terms(elementary_indices)),
+                (tf.equal(current_stage, tf.constant('junior_high1')), lambda: extract_terms(junior_high_indices)),
+                (tf.equal(current_stage, tf.constant('junior_high2')), lambda: extract_terms(junior_high_indices)),
+                (tf.equal(current_stage, tf.constant('high_school1')), lambda: extract_terms(high_school_indices)),
+                (tf.equal(current_stage, tf.constant('high_school2')), lambda: extract_terms(high_school_indices)),
+                (tf.equal(current_stage, tf.constant('high_school3')), lambda: extract_terms(high_school_indices)),
+            ], default=lambda: extract_terms(university_indices))
         
-        def extract_terms(term_indices):
-            return tf.reduce_sum(tf.gather(query, term_indices, axis=-1), axis=-1)
-
-        elementary_indices = tf.constant([0, 1, 2, 3, 4, 5])
-        junior_high_indices = tf.constant([6, 7, 8, 9, 10, 11])
-        high_school_indices = tf.constant([12, 13, 14, 15, 16, 17])
-        university_indices = tf.constant([18, 19, 20, 21, 22, 23])
-
-        return tf.case([
-            (tf.equal(current_stage, tf.constant('elementary1')), lambda: extract_terms(elementary_indices)),
-            (tf.equal(current_stage, tf.constant('elementary2')), lambda: extract_terms(elementary_indices)),
-            (tf.equal(current_stage, tf.constant('elementary3')), lambda: extract_terms(elementary_indices)),
-            (tf.equal(current_stage, tf.constant('junior_high1')), lambda: extract_terms(junior_high_indices)),
-            (tf.equal(current_stage, tf.constant('junior_high2')), lambda: extract_terms(junior_high_indices)),
-            (tf.equal(current_stage, tf.constant('high_school1')), lambda: extract_terms(high_school_indices)),
-            (tf.equal(current_stage, tf.constant('high_school2')), lambda: extract_terms(high_school_indices)),
-            (tf.equal(current_stage, tf.constant('high_school3')), lambda: extract_terms(high_school_indices)),
-        ], default=lambda: extract_terms(university_indices))
+        except Exception as e:
+            logger.error(f"Error en _extract_relevant_terms: {e}")
+            return query  # Devolver la consulta original en caso de erro
 
 
     def get_config(self):
