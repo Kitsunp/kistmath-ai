@@ -6,7 +6,6 @@ class MathProblem:
         self.solution = solution
         self.difficulty = difficulty
         self.concept = concept
-
 def generate_dataset(num_problems, stage, difficulty):
     problems = []
     if stage == 'elementary1':  # 1st-2nd grade
