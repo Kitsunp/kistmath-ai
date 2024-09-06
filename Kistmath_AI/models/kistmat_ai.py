@@ -9,9 +9,10 @@ from utils.tokenization import tokenize_problem
 import logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
 @register_keras_serializable(package='Custom', name=None)
 class Kistmat_AI(keras.Model):
-    def __init__(self, input_shape, output_shape, vocab_size=VOCAB_SIZE, name=None, **kwargs):
+    def __init__(self, input_shape, output_dim, vocab_size=VOCAB_SIZE, name=None, **kwargs):
         try:
             super(Kistmat_AI, self).__init__(name=name, **kwargs)
         except TypeError as e:
@@ -27,8 +28,8 @@ class Kistmat_AI(keras.Model):
             print("Ha ocurrido un error desconocido. Por favor, revisa el código y los argumentos de entrada.")
             raise
 
-        self.input_shape = input_shape
-        self.output_shape = output_shape
+        self._input_shape = input_shape
+        self._output_dim = output_dim
         self.vocab_size = vocab_size
         self.symbolic_reasoning = SymbolicReasoning()
 
@@ -47,6 +48,14 @@ class Kistmat_AI(keras.Model):
 
         self._learning_stage = tf.Variable('elementary1', trainable=False, dtype=tf.string)
 
+    @property
+    def input_shape(self):
+        return self._input_shape
+
+    @property
+    def output_dim(self):
+        return self._output_dim
+
     def _init_layers(self):
         try:
             self.final_reasoning_layer = keras.layers.Dense(512, activation='relu', kernel_regularizer=keras.regularizers.l2(0.01), name='final_reasoning_layer')
@@ -62,7 +71,7 @@ class Kistmat_AI(keras.Model):
             self.rule_output = keras.layers.Dense(64, activation='linear', name='rule_output')
             self.memory_attention = keras.layers.MultiHeadAttention(num_heads=8, key_dim=64, name='memory_attention')
             self.memory_dense = keras.layers.Dense(512, activation='relu', name='memory_dense')
-            self.final_output = keras.layers.Dense(self.output_shape, activation='linear', name='final_output')
+            self.final_output = keras.layers.Dense(self._output_dim, activation='linear', name='final_output')
         except ValueError as e:
             logger.error(f"ValueError in _init_layers: {e}")
             raise ValueError(f"Error initializing layers: {e}")
@@ -100,9 +109,9 @@ class Kistmat_AI(keras.Model):
     def _init_output_layers(self):
         try:
             stages = ['elementary1', 'elementary2', 'elementary3', 'junior_high1', 'junior_high2', 
-                      'high_school1', 'high_school2', 'high_school3', 'university']
+                    'high_school1', 'high_school2', 'high_school3', 'university']
             self.output_layers = {stage: keras.layers.Dense(128, activation='linear') for stage in stages}
-            self.final_output = keras.layers.Dense(self.output_shape, activation='sigmoid')
+            self.final_output = keras.layers.Dense(self._output_dim, activation='linear')
         except ValueError as e:
             print(f"Error en _init_output_layers: {e}")
             print("Asegúrate de que los valores de los parámetros de inicialización de las capas de salida sean correctos.")
@@ -130,6 +139,7 @@ class Kistmat_AI(keras.Model):
             print(f"Error inesperado en set_learning_stage: {e}")
             print("Ha ocurrido un error desconocido al establecer la etapa de aprendizaje. Por favor, revisa el código.")
             raise
+
     @tf.function
     def _apply_reasoning(self, x, training):
         try:
@@ -145,8 +155,8 @@ class Kistmat_AI(keras.Model):
             symbolic_out = self.symbolic_reasoning.reason(x)
             
             # Depuración: imprimir tipo y contenido de symbolic_out
-            print(f"Tipo de symbolic_out: {type(symbolic_out)}")
-            print(f"Contenido de symbolic_out: {symbolic_out}")
+            tf.print("Tipo de symbolic_out:", tf.shape(symbolic_out))
+            tf.print("Contenido de symbolic_out:", symbolic_out)
 
             # Concatenar la salida simbólica
             x = tf.concat([x, symbolic_out], axis=-1)
@@ -181,15 +191,14 @@ class Kistmat_AI(keras.Model):
             return x
         except ValueError as e:
             # Manejo de errores específico para fallos de valor
-            print(f"Error de valor en _apply_reasoning: {e}")
-            print(f"Tipo de x: {type(x)}")
-            print(f"Forma de x: {x.shape}")
+            tf.print(f"Error de valor en _apply_reasoning: {e}")
+            tf.print(f"Tipo de x: {tf.shape(x)}")
+            tf.print(f"Forma de x: {x.shape}")
             raise
         except Exception as e:
             # Manejo de errores genérico
-            print(f"Error inesperado en _apply_reasoning: {e}")
+            tf.print(f"Error inesperado en _apply_reasoning: {e}")
             raise
-
 
     @tf.function
     def apply_rule_based_reasoning(self, x, current_stage):
@@ -218,10 +227,11 @@ class Kistmat_AI(keras.Model):
         except Exception as e:
             logger.error(f"Error in apply_rule_based_reasoning: {e}")
             return x  # Return the input as is in case of error
+
     def _process_complex_output(self, x):
-        if tf.is_complex(x):
-            return tf.stack([tf.math.real(x), tf.math.imag(x)], axis=-1)
-        return x        
+        # Asumimos que x tiene forma (batch_size, 2)
+        return tf.complex(x[:, 0], x[:, 1])      
+
     @tf.function
     def call(self, inputs, training=False):
         try:
@@ -241,18 +251,19 @@ class Kistmat_AI(keras.Model):
             x = tf.ensure_shape(x, [None, self.input_shape[-1]])
             x = self._apply_reasoning(x, training)
             x = self._generate_output(x, current_stage, training)
-            # Procesar salida compleja si es necesario
+            
+            # Procesar salida compleja
             x = self._process_complex_output(x)
-            # Ensure the output shape is correct
-            x = tf.reshape(x, [-1, self.output_shape])
+            
+            # Ensure the output shape is correct (batch_size, 2)
+            x = tf.reshape(x, [-1, self._output_dim])
 
             return x
         except Exception as e:
             logger.error(f"Error in call: {e}")
             logger.error(f"Input shape: {inputs.shape}")
             logger.error(f"Current stage: {current_stage}")
-            return inputs  # Return the input as is in case of error
-
+            raise  # Re-raise the exception after logging
 
     def _process_input(self, inputs):
         try:
@@ -267,25 +278,27 @@ class Kistmat_AI(keras.Model):
                 )
 
             x = tf.convert_to_tensor(x, dtype=tf.float32)
-            print(f"Forma de x después de la conversión: {x.shape}")
+            tf.print(f"Forma de x después de la conversión: {tf.shape(x)}")
 
-            # Asegurarse de que x tiene la forma correcta (batch_size, time_steps)
-            if len(x.shape) == 1:
-                x = tf.expand_dims(x, axis=0)
+            # Asegurarse de que x tiene la forma correcta (batch_size, time_steps, 1)
+            if len(tf.shape(x)) == 2:
+                x = tf.expand_dims(x, axis=-1)
             
-            x = self.embedding(tf.cast(x, tf.int32))
-            print(f"Forma de x después de embedding: {x.shape}")
+            # Asegurarse de que la forma es conocida antes de pasar a la capa de embedding
+            x = tf.ensure_shape(x, [None, self._input_shape[0], 1])
+            
+            x = self.embedding(tf.cast(tf.squeeze(x, axis=-1), tf.int32))
+            tf.print(f"Forma de x después de embedding: {tf.shape(x)}")
 
             # Ahora x debería tener la forma (batch_size, time_steps, embedding_dim)
             x = self.lstm1(x)
             x = self.lstm2(x)
             return x
         except Exception as e:
-            print(f"Error detallado en _process_input: {e}")
-            print(f"Tipo de inputs: {type(inputs)}")
-            print(f"Forma de inputs: {inputs.shape if hasattr(inputs, 'shape') else 'N/A'}")
+            tf.print(f"Error detallado en _process_input: {e}")
+            tf.print(f"Tipo de inputs: {tf.shape(inputs)}")
+            tf.print(f"Forma de inputs: {tf.shape(inputs)}")
             raise
-
 
     def _apply_attention(self, x):
         try:
@@ -304,31 +317,40 @@ class Kistmat_AI(keras.Model):
             print(f"Error inesperado en _apply_attention: {e}")
             print("Ha ocurrido un error desconocido durante la aplicación de la atención. Por favor, revisa el código.")
             raise
+
     def build(self, input_shape):
         super().build(input_shape)
-        # Inicializar capas si es necesario
+        # Asegurarse de que input_shape es un TensorShape
+        if not isinstance(input_shape, tf.TensorShape):
+            input_shape = tf.TensorShape(input_shape)
+        # Actualizar self._input_shape si es necesario
+        if self._input_shape != input_shape[1:]:
+            self._input_shape = input_shape[1:]
+        # Inicializar capas
+        self._init_layers()
+        self._init_memory_components()
+        self._init_output_layers()
         self.built = True
-    # En el método _query_memories
     @tf.function
     def _query_memories(self, x):
         try:
-            logger.info(f"Iniciando _query_memories. Forma de x: {x.shape}")
+            logger.info(f"Iniciando _query_memories. Forma de x: {tf.shape(x)}")
             
             # Generar la consulta de memoria
             query = self.memory_query(x)
-            logger.info(f"Forma de query después de memory_query: {query.shape}")
+            logger.info(f"Forma de query después de memory_query: {tf.shape(query)}")
             
             # Asegurar que la consulta tenga la forma correcta
             query = tf.reshape(query, [-1, self.memory_system.external_memory.key_size])
-            logger.info(f"Forma de query después de reshape: {query.shape}")
+            logger.info(f"Forma de query después de reshape: {tf.shape(query)}")
             
             # Preparar los embeddings de memoria para la multiplicación matricial
             memory_embeddings = tf.transpose(self.memory_system.external_memory.memory_embeddings)
-            logger.info(f"Forma de memory_embeddings: {memory_embeddings.shape}")
+            logger.info(f"Forma de memory_embeddings: {tf.shape(memory_embeddings)}")
 
             # Calcular similitudes
             similarities = tf.matmul(query, memory_embeddings)
-            logger.info(f"Forma de similarities: {similarities.shape}")
+            logger.info(f"Forma de similarities: {tf.shape(similarities)}")
 
             # Obtener los top_k resultados más similares
             top_k = tf.minimum(5, tf.shape(similarities)[1])
@@ -336,7 +358,7 @@ class Kistmat_AI(keras.Model):
 
             # Obtener los embeddings de memoria correspondientes
             retrieved_memories = tf.gather(self.memory_system.external_memory.memory_embeddings, top_indices)
-            logger.info(f"Forma de retrieved_memories: {retrieved_memories.shape}")
+            logger.info(f"Forma de retrieved_memories: {tf.shape(retrieved_memories)}")
 
             # Procesar los resultados de diferentes tipos de memoria
             memory_results = self.memory_system.process_input({
@@ -359,39 +381,38 @@ class Kistmat_AI(keras.Model):
                     if tf.rank(result) == 2:
                         result = tf.expand_dims(result, axis=1)
                     memory_outputs.append(result)
-                    logger.info(f"Forma de resultado de {memory_type}: {result.shape}")
+                    logger.info(f"Forma de resultado de {memory_type}: {tf.shape(result)}")
 
             # Combinar todos los resultados de memoria
             combined_memory = tf.concat(memory_outputs, axis=1)
-            logger.info(f"Forma de combined_memory: {combined_memory.shape}")
+            logger.info(f"Forma de combined_memory: {tf.shape(combined_memory)}")
 
             # Aplicar atención sobre la memoria combinada
             x_expanded = tf.expand_dims(x, axis=1)
             attended_memory = self.memory_attention(x_expanded, combined_memory, combined_memory)
             attended_memory = tf.squeeze(attended_memory, axis=1)
-            logger.info(f"Forma de attended_memory: {attended_memory.shape}")
+            logger.info(f"Forma de attended_memory: {tf.shape(attended_memory)}")
 
             # Procesar la memoria atendida
             processed_memory = self.memory_dense(attended_memory)
-            logger.info(f"Forma de processed_memory: {processed_memory.shape}")
+            logger.info(f"Forma de processed_memory: {tf.shape(processed_memory)}")
 
             # Combinar la entrada original con la memoria procesada
             result = tf.concat([x, processed_memory], axis=-1)
-            logger.info(f"Forma final del resultado: {result.shape}")
+            logger.info(f"Forma final del resultado: {tf.shape(result)}")
 
             return result
 
         except tf.errors.InvalidArgumentError as e:
             logger.error(f"Error de argumento inválido en _query_memories: {e}")
             logger.error(f"Formas de las matrices involucradas:")
-            logger.error(f"x: {x.shape}")
-            logger.error(f"query: {query.shape}")
-            logger.error(f"memory_embeddings: {self.memory_system.external_memory.memory_embeddings.shape}")
+            logger.error(f"x: {tf.shape(x)}")
+            logger.error(f"query: {tf.shape(query)}")
+            logger.error(f"memory_embeddings: {tf.shape(self.memory_system.external_memory.memory_embeddings)}")
             return x  # Devolver la entrada original en caso de error
         except Exception as e:
             logger.error(f"Error inesperado en _query_memories: {e}")
             return x  # Devolver la entrada original en caso de error
-
 
     def _generate_output(self, x, current_stage, training):
         try:
@@ -418,7 +439,7 @@ class Kistmat_AI(keras.Model):
                                                 lambda: tf.no_op())
 
             x = self.final_output(x)
-            return tf.reshape(x, [-1, self.output_shape])
+            return tf.reshape(x, [-1, self._output_dim])
 
         except TypeError as e:
             print(f"Error de tipo en _generate_output: {e}")
@@ -460,15 +481,14 @@ class Kistmat_AI(keras.Model):
         
         except Exception as e:
             logger.error(f"Error en _extract_relevant_terms: {e}")
-            return query  # Devolver la consulta original en caso de erro
-
+            return query  # Devolver la consulta original en caso de error
 
     def get_config(self):
         try:
             config = super().get_config()
             config.update({
-                "input_shape": self.input_shape,
-                "output_shape": self.output_shape,
+                "input_shape": self._input_shape,
+                "output_dim": self._output_dim,
                 "vocab_size": self.vocab_size,
                 "learning_stage": self.get_learning_stage()
             })
@@ -490,11 +510,11 @@ class Kistmat_AI(keras.Model):
     def from_config(cls, config):
         try:
             input_shape = config.pop("input_shape", (MAX_LENGTH,))
-            output_shape = config.pop("output_shape", 1)
+            output_dim = config.pop("output_dim", 2)
             vocab_size = config.pop("vocab_size", VOCAB_SIZE)
             learning_stage = config.pop("learning_stage", "elementary1")
 
-            instance = cls(input_shape=input_shape, output_shape=output_shape, vocab_size=vocab_size, **config)
+            instance = cls(input_shape=input_shape, output_dim=output_dim, vocab_size=vocab_size, **config)
             instance.set_learning_stage(learning_stage)
             return instance
         except TypeError as e:
@@ -558,4 +578,3 @@ class Kistmat_AI(keras.Model):
         except Exception as e:
             logger.error(f"Error in _numpy_to_tensor: {e}")
             return input_data
-    
