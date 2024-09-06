@@ -18,6 +18,20 @@ This file contains the implementation of the `RealTimePlotter` class, which is u
     - **Returns**: None
     - **Description**: Appends the new data to the internal data list, removes the oldest data point if the list exceeds 100 points, clears the current plot, plots the updated data list, and redraws the canvas.
 
+#### Example
+```python
+from Kistmath_AI.visualization.real_time_plotter import RealTimePlotter
+
+# Initialize the real-time plotter
+plotter = RealTimePlotter()
+
+# Example data
+new_data = [1, 2, 3, 4, 5]
+
+# Update the plot with new data
+plotter.update_plot(new_data)
+```
+
 ## Dependencies
 
 - `tkinter`

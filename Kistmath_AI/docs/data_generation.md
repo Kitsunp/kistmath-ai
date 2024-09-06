@@ -23,6 +23,15 @@ This file contains functions for generating datasets of math problems.
   - `stage`: The learning stage.
   - `difficulty`: The difficulty level of the problems.
 
+#### Example
+```python
+from Kistmath_AI.utils.data_generation import generate_dataset
+
+# Generate a dataset of basic arithmetic problems
+dataset = generate_dataset(num_problems=100, stage="basic", difficulty=1)
+print(f"Generated dataset: {dataset}")
+```
+
 ## Dependencies
 
 - `numpy`

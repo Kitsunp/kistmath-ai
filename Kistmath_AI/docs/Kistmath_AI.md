@@ -59,6 +59,21 @@ This file contains the main script to run the Kistmat AI model.
       - `config`: The configuration dictionary.
     - **Returns**: A new instance of the model.
 
+### Usage Example
+```python
+from Kistmath_AI.models.kistmat_ai import Kistmat_AI
+
+# Initialize the model
+model = Kistmat_AI(input_shape=(100,), output_shape=(1,))
+
+# Example input
+inputs = [1, 2, 3, 4, 5]
+
+# Get the model output
+output = model(inputs)
+print(f"Model output: {output}")
+```
+
 ### SymbolicReasoner
 
 - **Description**: Implements symbolic reasoning capabilities for the Kistmat AI model.

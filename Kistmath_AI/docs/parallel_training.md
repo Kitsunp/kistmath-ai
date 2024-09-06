@@ -21,6 +21,23 @@ This file contains functions for parallel training of the Kistmat AI model.
   - `n_folds`: Number of folds for cross-validation.
 - **Returns**: A list of dictionaries containing training history and updated model weights for each fold.
 
+#### Example
+```python
+from Kistmath_AI.training.parallel_training import parallel_train_model
+from Kistmath_AI.models.kistmat_ai import Kistmat_AI
+from Kistmath_AI.utils.data_generation import generate_dataset
+
+# Initialize the model
+model = Kistmat_AI(input_shape=(100,), output_shape=(1,))
+
+# Generate a dataset
+problems = generate_dataset(num_problems=100, stage="basic", difficulty=1)
+
+# Train the model in parallel
+training_history = parallel_train_model(model, problems, epochs=10, n_folds=3)
+print(f"Training history: {training_history}")
+```
+
 ### reinforce_single(args)
 
 - **Description**: Performs a single reinforcement learning step on the model.
