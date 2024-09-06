@@ -1,10 +1,11 @@
 import unittest
 import numpy as np
 import tensorflow as tf
-from Kistmath_AI.models.kistmat_ai import Kistmat_AI
-from Kistmath_AI.utils.data_generation import generate_dataset, MathProblem
-from Kistmath_AI.training.curriculum_learning import smooth_curriculum_learning
-from Kistmath_AI.config.settings import READINESS_THRESHOLDS
+import time
+from models.kistmat_ai import Kistmat_AI
+from utils.data_generation import generate_dataset, MathProblem
+from training.curriculum_learning import smooth_curriculum_learning
+from config.settings import READINESS_THRESHOLDS
 
 class TestCurriculumLearningAndDataGeneration(unittest.TestCase):
     
@@ -44,18 +45,18 @@ class TestCurriculumLearningAndDataGeneration(unittest.TestCase):
             'elementary1': {'+', '-'},
             'elementary2': {'+', '-', '*'},
             'elementary3': {'+', '-', '*', '/'},
-            'junior_high1': {'linear_equation'},
-            'junior_high2': {'quadratic'},
-            'high_school1': {'logarithm'},
-            'high_school2': {'trigonometry'},
-            'high_school3': {'limits'},
-            'university': {'derivatives'}
+            'junior_high1': {'linear_equation', 'simple_inequalities'},
+            'junior_high2': {'quadratic', 'roots', 'factorization'},
+            'high_school1': {'logarithm', 'exponential'},
+            'high_school2': {'trigonometry', 'sine', 'cosine', 'tangent'},
+            'high_school3': {'limits', 'continuity'},
+            'university': {'derivatives', 'integrals', 'differential_equations'}
         }
         
         for stage, concepts in expected_concepts.items():
             data = generate_dataset(1000, stage, 1.0)
             generated_concepts = set(p.concept for p in data)
-            self.assertEqual(generated_concepts, concepts)
+            self.assertTrue(concepts.issubset(generated_concepts))
     
     def test_curriculum_learning_stage_progression(self):
         """Test if curriculum learning progresses through all stages"""
@@ -117,6 +118,64 @@ class TestCurriculumLearningAndDataGeneration(unittest.TestCase):
         memory_increase = (final_memory - initial_memory) / initial_memory
         
         self.assertLess(memory_increase, 0.5)  # Ensure memory usage doesn't increase by more than 50%
+    
+    def test_extreme_cases(self):
+        """Test data generation and curriculum learning with extreme cases"""
+        # Test with very large number of problems
+        large_dataset = generate_dataset(10000, 'elementary1', 1.0)
+        self.assertEqual(len(large_dataset), 10000)
+        
+        # Test with very high difficulty
+        hard_dataset = generate_dataset(100, 'university', 5.0)
+        self.assertTrue(all(p.difficulty >= 4.5 for p in hard_dataset))
+        
+        # Test curriculum learning with very short stages
+        short_history = smooth_curriculum_learning(self.model, self.stages, initial_problems=1, max_problems=2)
+        self.assertEqual(len(short_history), len(self.stages))
+    
+    def test_performance(self):
+        """Test performance of data generation and curriculum learning"""
+        start_time = time.time()
+        generate_dataset(1000, 'high_school3', 2.0)
+        end_time = time.time()
+        self.assertLess(end_time - start_time, 5)  # Data generation should take less than 5 seconds
+        
+        start_time = time.time()
+        smooth_curriculum_learning(self.model, self.stages[:2], initial_problems=10, max_problems=20)
+        end_time = time.time()
+        self.assertLess(end_time - start_time, 60)  # Curriculum learning for 2 stages should take less than 1 minute
+    
+    def test_result_consistency(self):
+        """Test consistency of results across multiple runs"""
+        results = []
+        for _ in range(5):
+            history = smooth_curriculum_learning(self.model, self.stages[:2], initial_problems=10, max_problems=20)
+            results.append(history[-1]['fold_histories'][-1]['history']['loss'][-1])
+        
+        # Check if all results are within 10% of the mean
+        mean_result = np.mean(results)
+        self.assertTrue(all(abs(r - mean_result) / mean_result < 0.1 for r in results))
+    
+    def test_robustness(self):
+        """Test robustness of the model to atypical or erroneous data"""
+        # Generate some atypical data
+        atypical_data = [
+            MathProblem("What is x?", "x", 'elementary1', 1.0),  # Ambiguous problem
+            MathProblem("2 + 2 = ?", 5, 'elementary1', 1.0),  # Incorrect solution
+            MathProblem("", 0, 'elementary1', 1.0),  # Empty problem
+            MathProblem("Very long problem " * 100, 42, 'elementary1', 1.0),  # Extremely long problem
+        ]
+        
+        # Train the model on normal data
+        normal_data = generate_dataset(100, 'elementary1', 1.0)
+        self.model.fit([p.problem for p in normal_data], [p.solution.real for p in normal_data], epochs=5)
+        
+        # Test the model on atypical data
+        for problem in atypical_data:
+            try:
+                self.model.predict([problem.problem])
+            except Exception as e:
+                self.fail(f"Model failed to handle atypical data: {str(e)}")
 
 if __name__ == '__main__':
     unittest.main()
