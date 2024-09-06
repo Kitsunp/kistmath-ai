@@ -17,16 +17,13 @@ from config.settings import STAGES, MAX_LENGTH, READINESS_THRESHOLDS
 # Suprimir mensajes de TensorFlow
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 tf.get_logger().setLevel('ERROR')
-
-tf.config.run_functions_eagerly(True)
-tf.data.experimental.enable_debug_mode()
-
+# Configurar TensorFlow de manera más Flexible
 def log_message(message, is_error=False):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     prefix = "ERROR" if is_error else "INFO"
     with open("program_log.txt", "a") as log_file:
         log_file.write(f"[{timestamp}] {prefix}: {message}\n")
-
+#tokenize_problem seguro
 def safe_tokenize_problem(problem, learning_stage):
     try:
         tokenized = tokenize_problem(problem, learning_stage)
@@ -35,24 +32,65 @@ def safe_tokenize_problem(problem, learning_stage):
     except Exception as e:
         error_message = f"Error al tokenizar el problema: {str(e)}\n{traceback.format_exc()}"
         log_message(error_message, is_error=True)
-        return np.zeros(MAX_LENGTH)
+        # En lugar de devolver ceros, podríamos lanzar una excepción para manejar este caso de forma más explícita
+        raise ValueError("No se pudo tokenizar el problema")
+# Configurar TensorFlow
+def configure_tensorflow():
+    # Configurar TensorFlow de manera más flexible
+    tf.config.threading.set_inter_op_parallelism_threads(0)  # Usa todos los núcleos disponibles
+    tf.config.threading.set_intra_op_parallelism_threads(0)  # Usa todos los núcleos disponibles
+    tf.config.set_soft_device_placement(True)
+    tf.config.optimizer.set_jit(True)  # Habilita XLA JIT compilation
+    
+    # Configurar el crecimiento de memoria de GPU si está disponible
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+    if gpus:
+        try:
+            for gpu in gpus:
+                tf.config.experimental.set_memory_growth(gpu, True)
+        except RuntimeError as e:
+            log_message(f"Error al configurar GPU: {str(e)}", is_error=True)
+
+def prepare_data(problems, model):
+    X = []
+    y = []
+    for problem in problems:
+        try:
+            tokenized = safe_tokenize_problem(problem.problem, model.get_learning_stage())
+            X.append(tokenized)
+            if isinstance(problem.solution, complex):
+                y.append([problem.solution.real, problem.solution.imag])
+            else:
+                y.append([problem.solution, 0])
+        except ValueError:
+            # Ignoramos los problemas que no se pueden tokenizar
+            continue
+    
+    X = np.array(X)
+    y = np.array(y, dtype=np.float32)
+    
+    # Asegurarse de que X es 3D y y es 2D
+    if len(X.shape) == 2:
+        X = np.expand_dims(X, axis=-1)
+    
+    return X, y
 
 def main():
     try:
         log_message("Iniciando el programa principal")
         
-        # Configure TensorFlow
-        os.environ['TF_NUM_INTEROP_THREADS'] = str(os.cpu_count())
-        os.environ['TF_NUM_INTRAOP_THREADS'] = str(os.cpu_count())
-        os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'
+        configure_tensorflow()
         log_message("Configuración de TensorFlow completada")
 
-        # Initialize model
-        model = Kistmat_AI(input_shape=(MAX_LENGTH,), output_shape=1)
+        # Inicializar modelo
+        model = Kistmat_AI(input_shape=(MAX_LENGTH,), output_dim=2)
         model.compile(optimizer='adam', loss='mse', metrics=['mae'])
-        log_message("Modelo Kistmat_AI inicializado y compilado")
-
-        # Start training
+        
+        # Construir el modelo explícitamente
+        model.build(input_shape=(None, MAX_LENGTH))
+        
+        log_message("Modelo Kistmat_AI inicializado, compilado y construido")
+        # Iniciar entrenamiento
         plot_queue = multiprocessing.Queue()
         plot_process = multiprocessing.Process(target=real_time_plotter, args=(plot_queue,))
         plot_process.start()
@@ -75,60 +113,36 @@ def main():
             plot_learning_curves(all_history)
             log_message("Curvas de aprendizaje generadas")
 
-        # Generate test problems and evaluate
+        # Generar problemas de prueba y evaluar
         log_message("Generando problemas de prueba")
         test_problems = generate_dataset(100, 'university', difficulty=2.0)
         log_message(f"Generados {len(test_problems)} problemas de prueba")
 
-        log_message("Tokenizando problemas de prueba")
-        X_test = np.array([safe_tokenize_problem(p.problem, model.get_learning_stage()) for p in test_problems])
-        y_test = np.array([p.solution for p in test_problems])
-
-        log_message(f"Forma inicial de X_test: {X_test.shape}")
-        log_message(f"Forma inicial de y_test: {y_test.shape}")
-
-        if len(X_test.shape) == 1:
-            X_test = np.expand_dims(X_test, axis=0)
-            log_message("X_test expandido a 2D")
-
-        if y_test.ndim == 1:
-            y_test = y_test.reshape(-1, 1)
-            log_message("y_test reformado a 2D")
-        elif hasattr(y_test[0], 'real') and hasattr(y_test[0], 'imag'):
-            y_test = np.array([[sol.real, sol.imag] for sol in y_test])
-            log_message("y_test convertido a formato real-imaginario")
-
-        log_message(f"Forma final de X_test: {X_test.shape}")
-        log_message(f"Forma final de y_test: {y_test.shape}")
+        X_test, y_test = prepare_data(test_problems, model)
+        log_message(f"Datos de prueba preparados. X_test shape: {X_test.shape}, y_test shape: {y_test.shape}")
 
         try:
             log_message("Realizando predicciones")
             predictions = model.predict(X_test)
-            log_message(f"Forma de las predicciones: {predictions.shape}")
+            
+            log_message(f"Predicciones completadas. Shape: {predictions.shape}")
 
-            if predictions.shape[1] != 1:
-                predictions = predictions.mean(axis=1, keepdims=True)
-                log_message("Predicciones promediadas a una columna")
-
-            log_message(f"Forma final de las predicciones: {predictions.shape}")
-
-            mse = np.mean(np.square(np.abs(y_test - predictions)))
+            # Calcular el error cuadrático medio para números complejos
+            mse = np.mean(np.abs(y_test[:, 0] + 1j*y_test[:, 1] - (predictions[:, 0] + 1j*predictions[:, 1]))**2)
             log_message(f"Error cuadrático medio: {mse}")
 
             log_message("\nMuestra de predicciones:")
             sample_size = min(5, len(test_problems))
             for i in range(sample_size):
                 log_message(f"Problema: {test_problems[i].problem}")
-                log_message(f"Predicción: {predictions[i]}")
+                log_message(f"Predicción: {predictions[i][0] + 1j*predictions[i][1]}")
                 log_message(f"Solución real: {test_problems[i].solution}")
             
             # Aprendizaje por refuerzo
             try:
                 log_message("Iniciando aprendizaje por refuerzo")
-                losses = parallel_reinforce_learning(model, test_problems[:sample_size],
-                                                    predictions[:sample_size], y_test[:sample_size])
-                for i, loss in enumerate(losses):
-                    log_message(f"Pérdida de aprendizaje por refuerzo para el problema {i + 1}: {loss}")
+                losses = parallel_reinforce_learning(model, test_problems, predictions, y_test)
+                log_message(f"Pérdida media de aprendizaje por refuerzo: {np.mean(losses)}")
             except Exception as e:
                 error_message = f"Error durante el aprendizaje por refuerzo: {str(e)}\n{traceback.format_exc()}"
                 log_message(error_message, is_error=True)
@@ -142,8 +156,4 @@ def main():
         log_message(error_message, is_error=True)
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        error_message = f"Error no manejado en la ejecución principal: {str(e)}\n{traceback.format_exc()}"
-        log_message(error_message, is_error=True)
+    main()
