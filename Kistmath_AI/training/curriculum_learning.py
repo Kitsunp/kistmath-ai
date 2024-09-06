@@ -6,7 +6,7 @@ from training.parallel_training import parallel_train_model
 from config.settings import READINESS_THRESHOLDS
 from visualization.real_time_plotter import RealTimePlotter
 from utils.tokenization import tokenize_problem
-
+from config.settings import MAX_LENGTH
 def smooth_curriculum_learning(model, stages, initial_problems=4000, max_problems=5000, difficulty_increase_rate=0.05):
     all_history = []
     current_difficulty = 1.0
@@ -17,6 +17,10 @@ def smooth_curriculum_learning(model, stages, initial_problems=4000, max_problem
     # Compile the model before starting the learning process
     model.compile(optimizer='adam', loss='mse', metrics=['mae'])
 
+    # Asegurarse de que el modelo esté construido
+    if not model.built:
+        model.build(input_shape=(None, MAX_LENGTH))
+    
     for stage in stages:
         print(f"\nEntering learning stage: {stage}")
         model.set_learning_stage(stage)

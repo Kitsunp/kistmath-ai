@@ -4,7 +4,7 @@ import tensorflow as tf
 from sklearn.model_selection import KFold
 from utils.tokenization import tokenize_problem, tokenize_calculus_problem
 from models.kistmat_ai import Kistmat_AI
-
+from config.settings import VOCAB_SIZE, MAX_LENGTH
 def train_fold(fold_data):
     try:
         model_config, model_weights, train_problems, val_problems, epochs = fold_data
@@ -18,10 +18,8 @@ def train_fold(fold_data):
 
         # Preparar los datos de entrenamiento
         X_train = np.array([tokenize_problem(p.problem, current_stage) for p in train_problems])
-        if current_stage == 'university':
-            y_train = np.array([np.abs(p.solution) for p in train_problems])
-        else:
-            y_train = np.array([p.solution for p in train_problems])
+        y_train = np.array([(p.solution.real, p.solution.imag) if isinstance(p.solution, complex) 
+                            else (p.solution, 0) for p in train_problems])
 
         # Validación de formas
         if X_train.shape[0] != y_train.shape[0]:
@@ -31,14 +29,11 @@ def train_fold(fold_data):
         print(f"Forma inicial de y_train: {y_train.shape}")
 
         # Asegurar que X_train tiene la forma correcta
-        X_train = np.expand_dims(X_train, axis=-1)
+        if len(X_train.shape) == 2:
+            X_train = np.expand_dims(X_train, axis=-1)
 
         # Asegurar que y_train sea float32
         y_train = y_train.astype(np.float32)
-
-        # Asegurar que y_train tiene la forma correcta
-        if y_train.ndim == 1:
-            y_train = y_train.reshape(-1, 1)
 
         print(f"Forma final de X_train: {X_train.shape}")
         print(f"Forma final de y_train: {y_train.shape}")
@@ -63,7 +58,7 @@ def train_fold(fold_data):
             all_history.append(history.history)
 
             # Guardar pesos después de cada época (opcional)
-            model.save_weights(f'temp_weights_epoch_{epoch}.h5')
+            model.save_weights(f'temp_weights_epoch_{epoch}.weights.h5')
 
         # Combinar los historiales de todas las épocas
         combined_history = {k: np.concatenate([h[k] for h in all_history]) for k in all_history[0].keys()}
@@ -101,6 +96,10 @@ def parallel_train_model(model, problems, epochs=10, n_folds=3):
     kf = KFold(n_splits=n_folds)
     fold_data = []
 
+    # Asegurarse de que el modelo esté construido
+    if not model.built:
+        model.build(input_shape=(None, MAX_LENGTH))
+
     model_config = model.get_config()
     model_weights = model.get_weights()
     for train_index, val_index in kf.split(problems):
@@ -117,20 +116,46 @@ def reinforce_single(args):
     try:
         model, problem, prediction, true_solution = args
         inputs = tf.convert_to_tensor([tokenize_problem(problem.problem, model.get_learning_stage())])
-        inputs = tf.reshape(inputs, (-1, model.input_shape[1]))  # Ajustar a la forma esperada por el modelo
-
-        if model.get_learning_stage() == 'university':
-            true_solution_tensor = tf.constant([[np.abs(true_solution)]], dtype=tf.float32)
+        
+        # Usar el getter de input_shape
+        model_input_shape = model.input_shape
+        if isinstance(model_input_shape, tuple):
+            inputs = tf.reshape(inputs, (-1,) + model_input_shape[1:])
         else:
-            if hasattr(true_solution, 'real') and hasattr(true_solution, 'imag'):
-                true_solution_tensor = tf.constant([[true_solution.real, true_solution.imag]], dtype=tf.float32)
+            # Si input_shape es un TensorShape, convertirlo a tuple
+            inputs = tf.reshape(inputs, (-1,) + tuple(model_input_shape[1:]))
+
+        # Convertir true_solution a un tensor de forma adecuada
+        if isinstance(true_solution, complex):
+            true_solution_tensor = tf.constant([[true_solution.real, true_solution.imag]], dtype=tf.float32)
+        elif isinstance(true_solution, (int, float)):
+            true_solution_tensor = tf.constant([[true_solution, 0]], dtype=tf.float32)
+        elif isinstance(true_solution, np.ndarray):
+            if true_solution.shape == (2,):
+                true_solution_tensor = tf.constant([true_solution], dtype=tf.float32)
             else:
-                true_solution_tensor = tf.constant([[true_solution]], dtype=tf.float32)
+                raise ValueError(f"Forma inesperada de true_solution: {true_solution.shape}")
+        else:
+            raise ValueError(f"Tipo inesperado de true_solution: {type(true_solution)}")
 
         with tf.GradientTape() as tape:
             predicted = model(inputs, training=True)
-            predicted = tf.reshape(predicted, true_solution_tensor.shape)
-            loss = tf.reduce_mean(tf.square(tf.cast(true_solution_tensor, tf.float32) - tf.cast(predicted, tf.float32)))
+            
+            # Asegurarse de que predicted tenga la forma correcta
+            if predicted.shape[-1] == 1:
+                predicted = tf.pad(predicted, [[0, 0], [0, 1]])  # Añadir un 0 para la parte imaginaria
+            elif predicted.shape[-1] > 2:
+                predicted = tf.reshape(predicted, [-1, 2])  # Reshape a (batch_size, 2)
+            
+            # Asegurarse de que true_solution_tensor tenga la misma forma que predicted
+            true_solution_tensor = tf.broadcast_to(true_solution_tensor, tf.shape(predicted))
+            
+            # Asegurarse de que ambos tensores sean del mismo tipo (float32)
+            predicted = tf.cast(predicted, tf.float32)
+            true_solution_tensor = tf.cast(true_solution_tensor, tf.float32)
+            
+            # Calcular la pérdida
+            loss = tf.reduce_mean(tf.square(true_solution_tensor - predicted))
 
         gradients = tape.gradient(loss, model.trainable_variables)
 
@@ -143,9 +168,14 @@ def reinforce_single(args):
         return loss.numpy()
     except Exception as e:
         print(f"Error en reinforce_single: {e}")
+        print(f"Tipo de true_solution: {type(true_solution)}")
+        print(f"Valor de true_solution: {true_solution}")
         raise
 
 def parallel_reinforce_learning(model, problems, predictions, true_solutions, learning_rate=0.01):
+    if not hasattr(model, 'input_shape'):
+        raise AttributeError("El modelo no tiene un atributo 'input_shape'. Asegúrate de que el modelo esté correctamente inicializado.")
+    
     reinforce_data = [(model, problem, prediction, true_solution) 
                       for problem, prediction, true_solution in zip(problems, predictions, true_solutions)]
 
