@@ -21,6 +21,42 @@ Kistmat-AI is an advanced machine learning model designed to solve a wide range 
 - Parallel Processing: Utilizes parallel processing for efficient training and reinforcement learning.
 - Real-time Visualization: Provides real-time plotting of learning curves and performance metrics.
 
+## Usage Examples
+
+#### Example 1: Basic Arithmetic Problem
+```python
+from Kistmath_AI.models.kistmat_ai import Kistmat_AI
+from Kistmath_AI.utils.tokenization import tokenize_problem
+
+# Initialize the model
+model = Kistmat_AI(input_shape=(100,), output_shape=(1,))
+
+# Tokenize a basic arithmetic problem
+problem = "2 + 2"
+tokenized_problem = tokenize_problem(problem, vocab_size=1000, max_length=100)
+
+# Predict the solution
+solution = model(tokenized_problem)
+print(f"Problem: {problem}, Solution: {solution}")
+```
+
+#### Example 2: Advanced Calculus Problem
+```python
+from Kistmath_AI.models.kistmat_ai import Kistmat_AI
+from Kistmath_AI.utils.tokenization import tokenize_calculus_problem
+
+# Initialize the model
+model = Kistmat_AI(input_shape=(100,), output_shape=(1,))
+
+# Tokenize a calculus problem
+problem = "integrate x^2 from 0 to 1"
+tokenized_problem = tokenize_calculus_problem(problem, max_terms=10)
+
+# Predict the solution
+solution = model(tokenized_problem)
+print(f"Problem: {problem}, Solution: {solution}")
+```
+
 ## Technical Details
 
 - Framework: TensorFlow and Keras

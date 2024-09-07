@@ -79,6 +79,14 @@ Thank you for your interest in contributing to KistMat AI! This document outline
 - Create unit tests for new features or changes.
 - Ensure all tests pass before submitting a pull request.
 
+## Documentation Guidelines
+
+- Ensure all new features and modules are documented.
+- Add usage examples for new features.
+- Update existing documentation to reflect changes in the codebase.
+- Use clear and concise language.
+- Follow the existing documentation structure and style.
+
 ## Documentation
 
 - Update README.md if necessary.
